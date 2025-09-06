@@ -96,7 +96,7 @@ jobs:
     - name: Setup SSH
       run: |
         mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        echo "${{ secrets.THAKII_02_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         ssh-keyscan -H thakii-02.fds-1.com >> ~/.ssh/known_hosts || true
         
@@ -109,7 +109,7 @@ jobs:
     - name: Setup Cloudflare Access
       run: |
         # Setup cloudflared with service token
-        echo "${{ secrets.CLOUDFLARE_SERVICE_TOKEN }}" | cloudflared access login --service-token-stdin || true
+        # echo "${{ secrets.CLOUDFLARE_SERVICE_TOKEN }}" | cloudflared access login --service-token-stdin || true
         
     - name: Test SSH Connection
       run: |
