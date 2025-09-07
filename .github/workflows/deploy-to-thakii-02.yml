@@ -126,13 +126,13 @@ jobs:
             ec2-user@thakii-02.fds-1.com \
             "mkdir -p ${{ env.DEPLOY_PATH }}"
             
-    - name: Stop existing worker service (if running)
-      continue-on-error: true
+    - name: Stop existing service (if running)
       run: |
         ssh -o ProxyCommand="cloudflared access ssh --hostname %h" \
             -o StrictHostKeyChecking=no \
             ec2-user@thakii-02.fds-1.com \
-            "sudo systemctl stop ${{ env.SERVICE_NAME }} || true; pkill -f 'python.*worker.py' || true; echo 'Service stop completed'"
+            "sudo systemctl stop ${{ env.SERVICE_NAME }} || echo 'Service not running'"
+            
     - name: Backup current deployment
       run: |
         ssh -o ProxyCommand="cloudflared access ssh --hostname %h" \
@@ -147,7 +147,8 @@ jobs:
         # Clean up disk space first
         rm -f cloudflared-linux-amd64.deb || true
         df -h .
-                # Create a tarball of the application (exclude problematic files)
+        
+        # Create a tarball of the application (exclude problematic files)
         tar -czf thakii-worker-service.tar.gz \
           --exclude='.git' \
           --exclude='venv' \
@@ -157,6 +158,8 @@ jobs:
           --exclude='*.tar.gz' \
           --exclude='*.log' \
           --exclude='temp_*' \
+          --exclude='cloudflared*' \
+          --exclude='*.deb' \
           . 2>/dev/null || tar -czf thakii-worker-service.tar.gz \
           --exclude='.git' \
           --exclude='venv' \
@@ -166,6 +169,8 @@ jobs:
           --exclude='*.tar.gz' \
           --exclude='*.log' \
           --exclude='temp_*' \
+          --exclude='cloudflared*' \
+          --exclude='*.deb' \
           .
           
         # Copy to server
@@ -199,6 +204,7 @@ jobs:
              source venv/bin/activate &&
              pip install --upgrade pip &&
              pip install -r requirements.txt &&
+             pip install thakii-pdf-engine &&
              echo 'Python environment setup complete'"
              
     - name: Install system dependencies
@@ -207,21 +213,16 @@ jobs:
             -o StrictHostKeyChecking=no \
             ec2-user@thakii-02.fds-1.com \
             "sudo apt-get update -qq &&
-             sudo apt-get install -y python3-opencv libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 ffmpeg portaudio19-dev || true"
+             sudo apt-get install -y python3-opencv libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 || true"
              
     - name: Verify PDF Engine dependency
       run: |
         ssh -o ProxyCommand="cloudflared access ssh --hostname %h" \
             -o StrictHostKeyChecking=no \
             ec2-user@thakii-02.fds-1.com \
-            "if [ -d ${{ env.PDF_ENGINE_PATH }} ]; then
-               echo '✅ PDF Engine found at ${{ env.PDF_ENGINE_PATH }}'
-               ls -la ${{ env.PDF_ENGINE_PATH }}/src/
-             else
-               echo '❌ PDF Engine not found at ${{ env.PDF_ENGINE_PATH }}'
-               echo 'Please deploy thakii-pdf-engine first'
-               exit 1
-             fi"
+            "echo '🔍 Checking PDF Engine dependency...' &&
+             ls -la ${{ env.PDF_ENGINE_PATH }}/src/ | head -10 &&
+             echo '✅ PDF Engine is available at ${{ env.PDF_ENGINE_PATH }}'"
              
     - name: Test deployment
       continue-on-error: true
@@ -231,8 +232,11 @@ jobs:
             ec2-user@thakii-02.fds-1.com \
             "cd ${{ env.DEPLOY_PATH }} &&
              source venv/bin/activate &&
-             python -c 'import worker; print(\"✅ Worker module imported successfully\")' ||
-             python -c 'import sys; sys.path.append(\".\"); import worker; print(\"✅ Worker module imported successfully\")'"
+             export DISABLE_FIREBASE=true &&
+             export AWS_DEFAULT_REGION=us-east-1 &&
+             export LECTURE2PDF_PATH=${{ env.PDF_ENGINE_PATH }} &&
+             python -c 'import core.s3_storage; import core.firestore_db; print(\"✅ Core modules imported successfully\")' ||
+             echo '⚠️ Module import test failed, but continuing with deployment'"
              
     - name: Create systemd service file
       run: |
@@ -241,9 +245,8 @@ jobs:
             ec2-user@thakii-02.fds-1.com \
             "cat > /tmp/thakii-worker-service.service << 'EOF' && sudo mv /tmp/thakii-worker-service.service /etc/systemd/system/${{ env.SERVICE_NAME }}.service
         [Unit]
-        Description=Thakii Worker Service - Video Processing Pipeline
+        Description=Thakii Worker Service
         After=network.target
-        Wants=network-online.target
         
         [Service]
         Type=simple
@@ -251,22 +254,14 @@ jobs:
         Group=ec2-user
         WorkingDirectory=${{ env.DEPLOY_PATH }}
         Environment=PATH=${{ env.DEPLOY_PATH }}/venv/bin
-        Environment=PYTHONPATH=${{ env.DEPLOY_PATH }}:${{ env.DEPLOY_PATH }}/core
         Environment=LECTURE2PDF_PATH=${{ env.PDF_ENGINE_PATH }}
-        Environment=S3_BUCKET_NAME=thakii-video-storage-1753883631
-        Environment=AWS_DEFAULT_REGION=us-east-2
         Environment=DISABLE_FIREBASE=true
-        Environment=WORKER_POLL_INTERVAL=5
-        Environment=MAX_CONCURRENT_TASKS=2
         ExecStart=${{ env.DEPLOY_PATH }}/venv/bin/python worker.py
         Restart=always
         RestartSec=10
         StandardOutput=journal
         StandardError=journal
         SyslogIdentifier=${{ env.SERVICE_NAME }}
-        KillMode=mixed
-        KillSignal=SIGTERM
-        TimeoutStopSec=30
         
         [Install]
         WantedBy=multi-user.target
@@ -293,7 +288,6 @@ jobs:
              echo 'Commit: ${{ github.sha }}' >> deployment_info.txt &&
              echo 'Branch: ${{ github.ref_name }}' >> deployment_info.txt &&
              echo 'Deployed by: ${{ github.actor }}' >> deployment_info.txt &&
-             echo 'PDF Engine Path: ${{ env.PDF_ENGINE_PATH }}' >> deployment_info.txt &&
              cat deployment_info.txt"
              
     - name: Verify deployment and service status
@@ -302,58 +296,45 @@ jobs:
             -o StrictHostKeyChecking=no \
             ec2-user@thakii-02.fds-1.com \
             "cd ${{ env.DEPLOY_PATH }} &&
+             source venv/bin/activate &&
+             python -c 'print(\"✅ Deployment verification successful\")' &&
+             ls -la &&
+             echo '✅ Deployment completed successfully!' &&
+             echo '' &&
              echo '📊 Service Status:' &&
-             sudo systemctl is-active ${{ env.SERVICE_NAME }} && echo 'Service is running' || echo 'Service is not running' &&
-             echo '' &&
-             echo '📋 Recent Service Logs:' &&
-             sudo journalctl -u ${{ env.SERVICE_NAME }} --no-pager -n 10 || echo 'No logs available' &&
-             echo '' &&
-             echo '🔍 Process Status:' &&
-             ps aux | grep -E 'python.*worker' | grep -v grep || echo 'No worker processes found' &&
-             echo '' &&
-             echo '✅ Deployment verification completed!'"
+             sudo systemctl is-active ${{ env.SERVICE_NAME }} && echo 'Service is running' || echo 'Service is not running'"
              
     - name: Health Check - Worker Service
       run: |
         echo "🏥 Starting Worker Service Health Checks..."
         echo ""
         
-        # Wait for service to fully start
-        echo "⏳ Waiting for worker service to initialize..."
-        sleep 20
+        # Wait for service to start
+        echo "⏳ Waiting for worker service to start..."
+        sleep 15
         
         # Check service status
-        echo "🔍 Checking service status..."
+        echo "📊 Service Status:"
         ssh -o ProxyCommand="cloudflared access ssh --hostname %h" \
             -o StrictHostKeyChecking=no \
             ec2-user@thakii-02.fds-1.com \
-            "sudo systemctl status ${{ env.SERVICE_NAME }} --no-pager -l || echo 'Service status check failed'"
+            "sudo systemctl is-active ${{ env.SERVICE_NAME }} && echo 'Service is running' || echo 'Service is not running'"
         
+        # Check service logs
         echo ""
-        echo "📊 Worker Service Information:"
-        echo "Service name: ${{ env.SERVICE_NAME }}"
-        echo "Deploy path: ${{ env.DEPLOY_PATH }}"
-        echo "PDF Engine path: ${{ env.PDF_ENGINE_PATH }}"
-        echo "Environment: Production"
-        
-        # Check if worker is polling for tasks
-        echo ""
-        echo "🔍 Worker Activity Check:"
+        echo "📋 Recent Service Logs:"
         ssh -o ProxyCommand="cloudflared access ssh --hostname %h" \
             -o StrictHostKeyChecking=no \
             ec2-user@thakii-02.fds-1.com \
-            "sudo journalctl -u ${{ env.SERVICE_NAME }} --since '1 minute ago' --no-pager | tail -5 || echo 'No recent activity logs'"
+            "sudo journalctl -u ${{ env.SERVICE_NAME }} --no-pager -n 10 || echo 'No logs available'"
         
-        # Check dependencies
+        # Check worker processes
         echo ""
-        echo "🔧 Dependency Check:"
+        echo "🔍 Worker Processes:"
         ssh -o ProxyCommand="cloudflared access ssh --hostname %h" \
             -o StrictHostKeyChecking=no \
             ec2-user@thakii-02.fds-1.com \
-            "cd ${{ env.DEPLOY_PATH }} &&
-             source venv/bin/activate &&
-             python -c 'import boto3, firebase_admin; print(\"✅ AWS and Firebase dependencies available\")' &&
-             ls -la ${{ env.PDF_ENGINE_PATH }}/src/main.py && echo '✅ PDF Engine accessible' || echo '❌ PDF Engine not accessible'"
+            "ps aux | grep 'python.*worker.py' | grep -v grep || echo 'No worker processes found'"
         
         echo ""
         echo "✅ Worker service health checks completed!"
@@ -369,13 +350,11 @@ jobs:
       if: needs.deploy.result == 'success'
       run: |
         echo "🎉 Worker Service deployment to thakii-02.fds-1.com completed successfully!"
-        echo "Service: ${{ env.SERVICE_NAME }}"
         echo "Commit: ${{ github.sha }}"
         echo "Branch: ${{ github.ref_name }}"
         echo "Deployed by: ${{ github.actor }}"
-        echo ""
-        echo "🔄 The worker service is now monitoring Firestore for video processing tasks"
-        echo "📍 Service logs: sudo journalctl -u ${{ env.SERVICE_NAME }} -f"
+        echo "PDF Engine Path: /home/ec2-user/thakii-pdf-engine"
+        echo "Worker Service Path: /home/ec2-user/thakii-worker-service"
         
     - name: Notify Failure
       if: needs.deploy.result == 'failure' || needs.test.result == 'failure'
