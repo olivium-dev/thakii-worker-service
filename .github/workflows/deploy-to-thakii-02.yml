@@ -144,7 +144,10 @@ jobs:
              
     - name: Deploy application files
       run: |
-        # Create a tarball of the application (exclude problematic files)
+        # Clean up disk space first
+        rm -f cloudflared-linux-amd64.deb || true
+        df -h .
+                # Create a tarball of the application (exclude problematic files)
         tar -czf thakii-worker-service.tar.gz \
           --exclude='.git' \
           --exclude='venv' \
