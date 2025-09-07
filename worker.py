@@ -4,9 +4,8 @@ import subprocess
 import tempfile
 import shutil
 from dotenv import load_dotenv
-from backend.core.s3_storage import S3Storage
-from backend.core.firestore_db import firestore_db
-from backend.core.server_manager import server_manager
+from core.s3_storage import S3Storage
+from core.firestore_db import firestore_db
 
 load_dotenv()
 LECTURE2PDF_PATH = os.getenv("LECTURE2PDF_PATH", "/lecture2pdf")
