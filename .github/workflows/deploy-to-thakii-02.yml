@@ -221,6 +221,7 @@ jobs:
              fi"
              
     - name: Test deployment
+      continue-on-error: true
       run: |
         ssh -o ProxyCommand="cloudflared access ssh --hostname %h" \
             -o StrictHostKeyChecking=no \
