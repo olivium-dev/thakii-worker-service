@@ -61,3 +61,14 @@ wasmer==1.1.0
 wasmer_compiler_cranelift==1.1.0
 websockets==10.0
 webvtt-py==0.4.6
+
+# Firebase Integration for Status Updates
+firebase-admin==6.2.0
+google-cloud-firestore==2.11.1
+
+# AWS S3 Integration for File Handling  
+boto3==1.34.131
+botocore==1.34.131
+
+# Environment Configuration
+python-dotenv==1.0.0
