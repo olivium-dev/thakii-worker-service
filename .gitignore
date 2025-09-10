@@ -50,3 +50,4 @@ coverage/
 
 # Docker
 .dockerignore
+Lecture-Video-to-PDF/
