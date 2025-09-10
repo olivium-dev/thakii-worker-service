@@ -151,4 +151,5 @@ plot-output/
 output.pdf
 
 # Mac files
-.DS_Store
+.DS_Storefirebase-service-account.json
+.env
