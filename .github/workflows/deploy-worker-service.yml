@@ -51,16 +51,23 @@ jobs:
         cloudflared version
 
     - name: 🔑 Setup SSH Key
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       run: |
         echo "🔑 Setting up SSH configuration..."
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
+        
+        # Setup SSH private key
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/thakii-02-developer-key
+        chmod 600 ~/.ssh/thakii-02-developer-key
         
         # Create SSH config for cloudflared proxy
         cat > ~/.ssh/config << EOF
         Host production-server
           HostName vps-71.fds-1.com
           User ec2-user
+          IdentityFile ~/.ssh/thakii-02-developer-key
           ProxyCommand cloudflared access ssh --hostname %h
           StrictHostKeyChecking no
           UserKnownHostsFile /dev/null
@@ -77,9 +84,6 @@ jobs:
         S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
       run: |
         echo "🚀 Starting deployment to production server..."
-        
-        # Install sshpass for password authentication
-        sudo apt-get update && sudo apt-get install -y sshpass
         
         # Create deployment script
         cat > deploy_script.sh << 'EOF'
@@ -226,7 +230,7 @@ jobs:
         
         # Execute deployment via SSH
         echo "🔐 Connecting to production server..."
-        sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        ssh -i ~/.ssh/thakii-02-developer-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
           -o ProxyCommand="cloudflared access ssh --hostname %h" \
           ec2-user@vps-71.fds-1.com \
           "export AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' && \
@@ -236,11 +240,9 @@ jobs:
            bash -s" < deploy_script.sh
 
     - name: 🔍 Verify Deployment
-      env:
-        SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
       run: |
         echo "🔍 Verifying deployment..."
-        sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        ssh -i ~/.ssh/thakii-02-developer-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
           -o ProxyCommand="cloudflared access ssh --hostname %h" \
           ec2-user@vps-71.fds-1.com \
           "cd /home/ec2-user/thakii-worker-service && \
