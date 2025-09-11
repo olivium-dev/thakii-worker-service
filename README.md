@@ -341,8 +341,8 @@ thakii-worker-service/
 │   ├── content_segment_exporter.py # PDF creation
 │   └── ...
 ├── core/                     # Cloud integrations
-│   ├── firestore_db.py      # Firebase client
-│   └── s3_storage.py        # AWS S3 client
+│   ├── firestore_integration.py   # Firebase client
+│   └── s3_integration.py          # AWS S3 client
 ├── postman-collections/      # API testing collections
 │   ├── Thakii_Complete_API.postman_collection.json
 │   └── Thakii_Complete_API.postman_environment.json
