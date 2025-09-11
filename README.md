@@ -6,6 +6,7 @@ Transform lecture videos into comprehensive PDF documents with **intelligent sub
 
 **✨ Key Features:**
 - 🎤 **Automatic Subtitle Generation** - No subtitle files needed!
+- 🌐 **Local API Server** - HTTP endpoints for easy integration (no authentication required)
 - 🔥 **Firebase Integration** - Real-time task management and status updates
 - ☁️ **AWS S3 Integration** - Seamless cloud storage for videos and PDFs
 - 🖼️ **Smart Frame Extraction** - Computer vision-based scene detection
@@ -17,11 +18,14 @@ Transform lecture videos into comprehensive PDF documents with **intelligent sub
 - [🚀 Quick Start](#quick-start)
 - [⚙️ Environment Setup](#environment-setup)
 - [🎬 Usage Methods](#usage-methods)
+- [🌐 Local API Server](#local-api-server)
 - [🔧 Worker Service](#worker-service)
 - [🧪 Testing](#testing)
 - [📊 Configuration](#configuration)
 - [🛠️ Development](#development)
 - [📖 API Reference](#api-reference)
+- [📚 Terminology](#terminology)
+- [📮 Postman Collection](#postman-collection)
 - [🤝 Contributing](#contributing)
 - [📄 License](#license)
 
@@ -137,10 +141,85 @@ python3 worker.py <video-id>
 # 5. Update Firebase with status
 ```
 
-### Method 3: Batch Processing
+### Method 3: Local API Server
+```bash
+# Start the local API server (no authentication required)
+python3 api_server.py
+
+# Server will run on http://localhost:9000
+# Available endpoints:
+# - GET /health - Service health check
+# - POST /generate-pdf - Upload video and generate PDF
+# - GET /list - List all processed videos
+# - GET /status/<video_id> - Check processing status
+# - GET /download/<video_id>.pdf - Download generated PDF
+```
+
+### Method 4: Batch Processing
 ```bash
 # Process all pending tasks from Firebase
 python3 worker.py --process-all
+```
+
+---
+
+## 🌐 Local API Server
+
+The repository includes a Flask-based API server that provides HTTP endpoints for video processing without any authentication requirements.
+
+### Starting the Server
+```bash
+python3 api_server.py
+```
+
+The server runs on `http://localhost:9000` and provides the following endpoints:
+
+### API Endpoints
+
+#### 1. Health Check
+```bash
+GET /health
+```
+Returns server status and health information.
+
+#### 2. Upload Video & Generate PDF
+```bash
+POST /generate-pdf
+Content-Type: multipart/form-data
+
+# Form data:
+# - video: video file (MP4, AVI, etc.)
+```
+Uploads a video file and starts asynchronous PDF generation. Returns immediately with processing status.
+
+#### 3. Check Status
+```bash
+GET /status/<video_id>
+```
+Check the processing status of a video. Returns status, progress, and download information.
+
+#### 4. List All Videos
+```bash
+GET /list
+```
+Returns a list of all processed videos with their status and metadata.
+
+#### 5. Download PDF
+```bash
+GET /download/<video_id>.pdf
+```
+Downloads the generated PDF file for a specific video.
+
+### Example Usage
+```bash
+# 1. Upload video and start processing
+curl -X POST -F "video=@your_video.mp4" http://localhost:9000/generate-pdf
+
+# 2. Check status (use video_id from step 1)
+curl http://localhost:9000/status/your-video-id
+
+# 3. Download PDF when ready
+curl -O http://localhost:9000/download/your-video-id.pdf
 ```
 
 ---
@@ -262,11 +341,15 @@ thakii-worker-service/
 │   ├── content_segment_exporter.py # PDF creation
 │   └── ...
 ├── core/                     # Cloud integrations
-│   ├── firestore_integration.py   # Firebase client
-│   └── s3_integration.py          # AWS S3 client
-├── worker.py                 # Main worker service
-├── tests/                    # Test suite
-└── requirements.txt          # Dependencies
+│   ├── firestore_db.py      # Firebase client
+│   └── s3_storage.py        # AWS S3 client
+├── postman-collections/      # API testing collections
+│   ├── Thakii_Complete_API.postman_collection.json
+│   └── Thakii_Complete_API.postman_environment.json
+├── api_server.py            # Local Flask API server
+├── worker.py                # Main worker service
+├── tests/                   # Test suite
+└── requirements.txt         # Dependencies
 ```
 
 ### Adding New Features
@@ -333,6 +416,72 @@ process_video(
 
 ---
 
+## 📚 Terminology
+
+Understanding the key concepts used throughout this project:
+
+### Content Segments
+- **Definition**: A part of the video from a particular start and end time that explains one concept
+- **Example**: 00:02:05 - 00:04:00 of the video explaining a slide about planet Mars
+- **Components**: Contains both a video segment and its corresponding subtitle segment
+
+### Video Segment
+- **Definition**: The last video frame of a content segment
+- **Example**: The video segment of 00:02:05 - 00:04:00 is the last video frame in that time range
+- **Purpose**: Represents the key visual information for that content section
+
+### Subtitle Segment
+- **Definition**: The text component of a content segment
+- **Example**: The subtitle segment of 00:02:05 - 00:04:00 might be "In this slide, we are going to discuss..."
+- **Purpose**: Provides the textual explanation for the visual content
+
+### Subtitle Parts
+- **Definition**: A subset of the video's subtitles
+- **Purpose**: Created when reading and processing the video's subtitle files
+- **Usage**: Building blocks for generating the final subtitle segments
+
+---
+
+## 📮 Postman Collection
+
+The repository includes a comprehensive Postman collection for testing the Local API Server.
+
+### Files Location
+```
+postman-collections/
+├── Thakii_Complete_API.postman_collection.json  # Main collection
+└── Thakii_Complete_API.postman_environment.json # Environment variables
+```
+
+### Quick Setup
+1. **Import Collection**: Open Postman → Import → Select `Thakii_Complete_API.postman_collection.json`
+2. **Import Environment**: Import → Select `Thakii_Complete_API.postman_environment.json`
+3. **Select Environment**: Choose "Thakii Complete API Environment" from dropdown
+4. **Start API Server**: Run `python3 api_server.py` in terminal
+5. **Test**: Run any request in the collection
+
+### Available Tests
+- **🎬 Upload Video & Generate PDF** - Upload video file and start processing
+- **📋 List All Videos** - Get all videos with status
+- **📊 Check Status** - Monitor processing progress
+- **📄 Download PDF** - Download generated PDF files
+
+### Environment Variables
+- `API_BASE_URL`: Set to `http://localhost:9000` (default)
+- `VIDEO_ID`: Automatically populated during testing
+
+### Running Tests
+```bash
+# Option 1: Individual requests in Postman UI
+# Option 2: Run entire collection
+# Option 3: Command line with Newman
+npm install -g newman
+newman run postman-collections/Thakii_Complete_API.postman_collection.json \
+  -e postman-collections/Thakii_Complete_API.postman_environment.json
+```
+
+---
+
 ## 🤝 Contributing
 
 ### Development Setup
@@ -360,7 +509,26 @@ pip install -r requirements-dev.txt  # Development dependencies
 
 ## 📄 License
 
-This project is protected under the GNU General Public License. Please refer to the LICENSE.txt for more information.
+This project is licensed under the **GNU General Public License v3.0**.
+
+### License Summary
+- ✅ **Commercial use** - You can use this software for commercial purposes
+- ✅ **Modification** - You can modify the source code
+- ✅ **Distribution** - You can distribute the software
+- ✅ **Patent use** - You can use any patents that may be related to the software
+- ✅ **Private use** - You can use the software for private purposes
+
+### Requirements
+- 📄 **License and copyright notice** - Include the license and copyright notice with the software
+- 📄 **State changes** - Document any changes made to the software
+- 📄 **Disclose source** - Make the source code available when distributing
+- 📄 **Same license** - Use the same license for derivative works
+
+### Limitations
+- ❌ **Liability** - The software comes without warranty or liability
+- ❌ **Warranty** - No warranty is provided with the software
+
+For the complete license text, see the full GNU General Public License v3.0 terms and conditions.
 
 ### Credits
 

@@ -1,0 +1,279 @@
+{
+	"info": {
+		"_postman_id": "thakii-essential-api",
+		"name": "Thakii Essential API Collection",
+		"description": "Essential APIs for Thakii Worker Service - Upload videos, check status, download PDFs. No authentication required.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "🏥 Health Check",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Health Check Success', function () {",
+							"    pm.response.to.have.status(200);",
+							"    const responseJson = pm.response.json();",
+							"    pm.expect(responseJson).to.have.property('status', 'healthy');",
+							"    console.log('✅ Service Status:', responseJson.status);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{API_BASE_URL}}/health",
+					"host": [
+						"{{API_BASE_URL}}"
+					],
+					"path": [
+						"health"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "🎬 Upload Video & Generate PDF",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Upload Video & Generate PDF Success', function () {",
+							"    pm.response.to.have.status(201);",
+							"    const responseJson = pm.response.json();",
+							"    pm.expect(responseJson).to.have.property('video_id');",
+							"    pm.expect(responseJson).to.have.property('status', 'processing');",
+							"    ",
+							"    // Store video ID for later tests",
+							"    pm.collectionVariables.set('VIDEO_ID', responseJson.video_id);",
+							"    ",
+							"    console.log('✅ Video uploaded and processing started');",
+							"    console.log('📹 Video ID:', responseJson.video_id);",
+							"    console.log('📊 Status:', responseJson.status);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "video",
+							"type": "file",
+							"src": "test.mp4",
+							"description": "Video file to process"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{API_BASE_URL}}/generate-pdf",
+					"host": [
+						"{{API_BASE_URL}}"
+					],
+					"path": [
+						"generate-pdf"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "📋 List All Videos",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('List All Videos Success', function () {",
+							"    pm.response.to.have.status(200);",
+							"    const responseJson = pm.response.json();",
+							"    pm.expect(responseJson).to.have.property('videos');",
+							"    pm.expect(responseJson).to.have.property('total');",
+							"    console.log('✅ Total videos:', responseJson.total);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{API_BASE_URL}}/list",
+					"host": [
+						"{{API_BASE_URL}}"
+					],
+					"path": [
+						"list"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "📊 Check Status",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Check Video Status', function () {",
+							"    const statusCode = pm.response.code;",
+							"    const videoId = pm.collectionVariables.get('VIDEO_ID');",
+							"    ",
+							"    if (statusCode === 200) {",
+							"        const responseJson = pm.response.json();",
+							"        pm.expect(responseJson).to.have.property('video_id', videoId);",
+							"        pm.expect(responseJson).to.have.property('status');",
+							"        pm.expect(responseJson).to.have.property('pdf_ready');",
+							"        ",
+							"        console.log('✅ Status retrieved');",
+							"        console.log('📊 Status:', responseJson.status);",
+							"        console.log('📄 PDF Ready:', responseJson.pdf_ready);",
+							"        ",
+							"        if (responseJson.pdf_ready) {",
+							"            console.log('🎉 PDF is ready for download!');",
+							"        }",
+							"    } else if (statusCode === 404) {",
+							"        console.log('⚠️ Video not found');",
+							"        pm.expect(statusCode).to.equal(404);",
+							"    }",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{API_BASE_URL}}/status/{{VIDEO_ID}}",
+					"host": [
+						"{{API_BASE_URL}}"
+					],
+					"path": [
+						"status",
+						"{{VIDEO_ID}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "📄 Download PDF",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Download PDF', function () {",
+							"    const statusCode = pm.response.code;",
+							"    const videoId = pm.collectionVariables.get('VIDEO_ID');",
+							"    ",
+							"    if (statusCode === 200) {",
+							"        const contentType = pm.response.headers.get('Content-Type');",
+							"        pm.expect(contentType).to.include('application/pdf');",
+							"        ",
+							"        const contentLength = pm.response.headers.get('Content-Length');",
+							"        console.log('✅ PDF downloaded successfully');",
+							"        console.log('📄 Content-Type:', contentType);",
+							"        console.log('📏 File Size:', contentLength, 'bytes');",
+							"        ",
+							"        if (contentLength && parseInt(contentLength) > 1000) {",
+							"            console.log('🎉 Real PDF file confirmed');",
+							"        }",
+							"    } else if (statusCode === 404) {",
+							"        const responseJson = pm.response.json();",
+							"        console.log('⏳ PDF not ready yet - check status first');",
+							"        pm.expect(statusCode).to.equal(404);",
+							"    }",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/pdf, application/json"
+					}
+				],
+				"url": {
+					"raw": "{{API_BASE_URL}}/download/{{VIDEO_ID}}.pdf",
+					"host": [
+						"{{API_BASE_URL}}"
+					],
+					"path": [
+						"download",
+						"{{VIDEO_ID}}.pdf"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"console.log('🎬 Thakii Essential API Test');",
+					"console.log('Request:', pm.info.requestName);"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"pm.test('Response time is reasonable', function () {",
+					"    pm.expect(pm.response.responseTime).to.be.below(30000);",
+					"});"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "VIDEO_ID",
+			"value": "",
+			"type": "string",
+			"description": "ID of uploaded video"
+		}
+	]
+}
