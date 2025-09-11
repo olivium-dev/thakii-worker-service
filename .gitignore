@@ -153,3 +153,4 @@ output.pdf
 # Mac files
 .DS_Storefirebase-service-account.json
 .env
+firebase-service-account.json

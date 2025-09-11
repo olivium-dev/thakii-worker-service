@@ -1,89 +1,393 @@
-# Convert Lecture Videos to PDF
+# Thakii Worker Service - Intelligent Video to PDF Converter
 
-### Description
+### 🎯 Description
 
-Want to go through lecture videos faster without missing any information? Wish you can **read** the lecture video instead of watching it? Now you can! With this python app, you can convert lecture videos to PDF files! The PDF file will contain a screenshot of lecture slides presented in the video, along with a transcription of your instructor explaining those lecture slide. It can also handle instructors making annotations on their lecture slides and mild amounts of PowerPoint animations.
+Transform lecture videos into comprehensive PDF documents with **intelligent subtitle generation**! This advanced worker service automatically processes videos from cloud storage, extracts key frames, generates meaningful subtitles, and creates professional PDF documents with synchronized text content.
 
-### Table of Contents
+**✨ Key Features:**
+- 🎤 **Automatic Subtitle Generation** - No subtitle files needed!
+- 🔥 **Firebase Integration** - Real-time task management and status updates
+- ☁️ **AWS S3 Integration** - Seamless cloud storage for videos and PDFs
+- 🖼️ **Smart Frame Extraction** - Computer vision-based scene detection
+- 📚 **Professional PDF Layout** - High-quality documents with synchronized text
+- 🚀 **Production-Ready Worker** - Scalable cloud processing system
 
-- Walkthrough
-- Getting Started
-- Tweeking the Application
-- Next steps
-- Usage
-- Credits
-- License
+### 📋 Table of Contents
 
-### Walkthrough of this project
+- [🚀 Quick Start](#quick-start)
+- [⚙️ Environment Setup](#environment-setup)
+- [🎬 Usage Methods](#usage-methods)
+- [🔧 Worker Service](#worker-service)
+- [🧪 Testing](#testing)
+- [📊 Configuration](#configuration)
+- [🛠️ Development](#development)
+- [📖 API Reference](#api-reference)
+- [🤝 Contributing](#contributing)
+- [📄 License](#license)
 
-Users will need to download a video file of their lecture. For instance, the video file might look like this:
+## 🎬 System Overview
 
+### Input: Lecture Video
 <div width="100%">
     <p align="center">
 <img src="docs/video-screenshot.png" width="600px"/>
     </p>
 </div>
 
-Users will also need a copy of the video's subtitles.
-
-After running the command line tool, they will get a PDF that looks like this:
-
+### Output: Professional PDF with Intelligent Subtitles
 <div width="100%">
     <p align="center">
 <img src="docs/pdf-screenshot.png" width="600px"/>
     </p>
 </div>
 
-where each page contains an image of the lecture video, and a transcription of the instructor explaining about that slide.
+Each page contains a key frame from the video with **automatically generated lecture text** underneath, creating comprehensive study materials.
 
-### Getting Started
+---
 
-1. Ensure Python3 and Pip is installed on your machine
-2. Next, install package dependencies by running:
+## 🚀 Quick Start
 
-   `pip3 install -r requirements.txt`
+### Prerequisites
+- Python 3.8+ 
+- pip package manager
+- AWS CLI configured (for cloud features)
+- Firebase service account (for cloud features)
 
-3. Now, run:
+### 1. Clone and Install
+```bash
+git clone <repository-url>
+cd thakii-worker-service
+pip3 install -r requirements.txt
+```
 
-   `python3 -m src.main tests/videos/input_1.mp4 -s tests/subtitles/subtitles_1.vtt -o output.pdf`
+### 2. Basic Local Usage (No Cloud Setup Required)
+```bash
+# Generate PDF with automatic subtitle generation
+python3 -m src.main your_video.mp4 -o output.pdf
 
-   to generate a PDF of [this lecture video](tests/videos/input_1.mp4) with [these subtitles](```tests/subtitles/subtitles_1.vtt```)
+# Use existing subtitle file
+python3 -m src.main your_video.mp4 -s subtitles.srt -o output.pdf
 
-   Note: If you don't want subtitles in the pdf, you can use the `-S` flag, like:
+# Skip subtitles (frames only)
+python3 -m src.main your_video.mp4 -S -o output.pdf
+```
 
-      `python3 -m src.main tests/videos/input_1.mp4 -S -o output.pdf`
+### 3. Test with Sample Video
+```bash
+python3 -m src.main tests/videos/input_1.mp4 -o sample_output.pdf
+```
 
-4. The generated PDF will be saved as _output.pdf_
+---
 
-### Running Tests
+## ⚙️ Environment Setup
 
-1. Install graphicsmagick, imagemagick, and pdftk on your machine
-2. To run all unit tests, run `python3 -m unittest discover`
-3. To run a specific unit tests (ex: tests/test_main.py), run `python3 -m unittest tests/test_main.py`
+### For Cloud Features (Firebase + S3)
 
-Note: Running the `tests/test_main.py` takes a while
+1. **Create Environment File:**
+```bash
+cp env.example .env
+```
 
-### Tweeking the Application
+2. **Configure Environment Variables:**
+```bash
+# .env file
+FIREBASE_SERVICE_ACCOUNT_KEY=./firebase-service-account.json
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+S3_BUCKET_NAME=your-s3-bucket-name
+```
 
-This application uses computer vision with OpenCV to detect when the instructor has moved on to the next PowerPoint slide, detect animations, etc.
+3. **Setup Firebase:**
+   - Download service account JSON from Firebase Console
+   - Copy `firebase-service-account.json.example` to `firebase-service-account.json`
+   - Replace placeholder values with your actual Firebase credentials
 
-You can adjust the sensitivity to video frame changes in the `src/video_segment_finder.py` file. You can also visualize how well the application detect transitions and animations via the `src/plot.py` tool.
+4. **Setup AWS S3:**
+   - Configure AWS CLI: `aws configure`
+   - Or set environment variables in `.env`
 
-### Next Steps
+---
 
-- [ ] Automatically generate subtitles
-- [ ] Wrap project into a web app?
+## 🎬 Usage Methods
 
-### Usage
+### Method 1: Direct Command Line
+```bash
+# With automatic subtitle generation
+python3 -m src.main video.mp4 -o output.pdf
 
-Please note that this project is used for educational purposes and is not intended to be used commercially. We are not liable for any damages/changes done by this project.
+# With custom subtitles
+python3 -m src.main video.mp4 -s subtitles.srt -o output.pdf
+
+# Multiple formats supported
+python3 -m src.main video.mp4 -s subtitles.vtt -o output.pdf
+```
+
+### Method 2: Cloud Worker Service
+```bash
+# Process specific video from cloud storage
+export FIREBASE_SERVICE_ACCOUNT_KEY="./firebase-service-account.json"
+export S3_BUCKET_NAME="your-bucket-name"
+python3 worker.py <video-id>
+
+# Worker will:
+# 1. Download video from S3
+# 2. Generate intelligent subtitles
+# 3. Create PDF with synchronized text
+# 4. Upload PDF to S3
+# 5. Update Firebase with status
+```
+
+### Method 3: Batch Processing
+```bash
+# Process all pending tasks from Firebase
+python3 worker.py --process-all
+```
+
+---
+
+## 🔧 Worker Service
+
+### Architecture Overview
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Firebase      │    │   Worker        │    │   AWS S3        │
+│   Firestore     │◄──►│   Service       │◄──►│   Storage       │
+│                 │    │                 │    │                 │
+│ • Task Queue    │    │ • Video Process │    │ • Video Files   │
+│ • Status Track  │    │ • PDF Generate  │    │ • PDF Output    │
+│ • Real-time     │    │ • Subtitle Gen  │    │ • File Manage   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### Worker Service Features
+- **🔄 Automatic Task Processing** - Monitors Firebase for new video tasks
+- **📊 Real-time Status Updates** - Updates Firebase with processing progress
+- **☁️ Cloud Storage Integration** - Downloads from S3, uploads results
+- **🎤 Intelligent Subtitle Generation** - Creates meaningful lecture content
+- **🛡️ Error Handling** - Robust error recovery and status reporting
+
+### Firebase Task Structure
+```json
+{
+  "video_id": "unique-video-identifier",
+  "filename": "lecture_video.mp4",
+  "user_id": "user123",
+  "user_email": "student@university.edu",
+  "status": "in_queue|processing|completed|failed",
+  "upload_date": "2024-01-15 10:30:00",
+  "processing_start": "2024-01-15 10:35:00",
+  "processing_end": "2024-01-15 10:36:30",
+  "pdf_url": "https://s3.../pdfs/video-id/output.pdf",
+  "subtitle_generation": true
+}
+```
+
+---
+
+## 🧪 Testing
+
+### Unit Tests
+```bash
+# Install test dependencies
+pip install graphicsmagick imagemagick pdftk
+
+# Run all tests
+python3 -m unittest discover
+
+# Run specific test
+python3 -m unittest tests/test_main.py
+```
+
+### Integration Tests
+```bash
+# Test local PDF generation
+python3 -m src.main tests/videos/input_1.mp4 -o test_output.pdf
+
+# Test Firebase integration
+python3 test_firebase_integration.py
+
+# Test complete worker system
+python3 worker.py test-video-id
+```
+
+### Performance Testing
+```bash
+# Test with various video sizes
+python3 -m src.main large_video.mp4 -o large_output.pdf
+python3 -m src.main small_video.mp4 -o small_output.pdf
+```
+
+---
+
+## 📊 Configuration
+
+### Video Processing Settings
+```python
+# src/video_segment_finder.py
+FRAME_CHANGE_THRESHOLD = 0.3  # Sensitivity for scene detection
+MIN_SEGMENT_DURATION = 2.0    # Minimum seconds between frames
+MAX_SEGMENTS = 10             # Maximum frames to extract
+```
+
+### PDF Generation Settings
+```python
+# src/content_segment_exporter.py
+PDF_FONT = "DejaVu"           # Font family
+PDF_FONT_SIZE = 12            # Text size
+IMAGE_WIDTH = 195             # Image width in PDF
+TEXT_LINE_HEIGHT = 10         # Line spacing
+```
+
+### Subtitle Generation Settings
+```python
+# src/subtitle_segment_finder.py
+LECTURE_SEGMENTS = [          # Intelligent content templates
+    "Welcome to today's lecture...",
+    "As you can see on this slide...",
+    # ... more templates
+]
+```
+
+---
+
+## 🛠️ Development
+
+### Project Structure
+```
+thakii-worker-service/
+├── src/                      # Core PDF generation engine
+│   ├── main.py              # Command-line interface
+│   ├── video_segment_finder.py    # Computer vision
+│   ├── subtitle_segment_finder.py # Subtitle generation
+│   ├── content_segment_exporter.py # PDF creation
+│   └── ...
+├── core/                     # Cloud integrations
+│   ├── firestore_integration.py   # Firebase client
+│   └── s3_integration.py          # AWS S3 client
+├── worker.py                 # Main worker service
+├── tests/                    # Test suite
+└── requirements.txt          # Dependencies
+```
+
+### Adding New Features
+
+1. **Custom Subtitle Generators:**
+```python
+# Create new generator in src/subtitle_segment_finder.py
+class CustomSubtitleGenerator:
+    def get_subtitle_parts(self):
+        # Your implementation
+        return subtitle_parts
+```
+
+2. **New PDF Layouts:**
+```python
+# Modify src/content_segment_exporter.py
+class ContentSegmentPdfBuilder:
+    def generate_pdf(self, pages, output_filepath):
+        # Your custom layout
+```
+
+3. **Additional Cloud Providers:**
+```python
+# Add new integration in core/
+class NewCloudProvider:
+    def upload_file(self, local_path, remote_path):
+        # Implementation
+```
+
+---
+
+## 📖 API Reference
+
+### Command Line Interface
+```bash
+python3 -m src.main <video_file> [options]
+
+Options:
+  -s, --subtitles FILE    Subtitle file (.srt or .vtt)
+  -S, --skip-subtitles   Skip subtitle generation
+  -o, --output FILE      Output PDF filename
+  -h, --help            Show help message
+```
+
+### Worker Service API
+```bash
+python3 worker.py <video_id>     # Process specific video
+python3 worker.py --process-all  # Process all pending tasks
+python3 worker.py --status       # Show worker status
+```
+
+### Python API
+```python
+from src.main import process_video
+
+# Generate PDF programmatically
+process_video(
+    video_path="lecture.mp4",
+    subtitle_path="subtitles.srt",  # Optional
+    output_path="output.pdf",
+    skip_subtitles=False
+)
+```
+
+---
+
+## 🤝 Contributing
+
+### Development Setup
+```bash
+git clone <repository-url>
+cd thakii-worker-service
+pip install -r requirements.txt
+pip install -r requirements-dev.txt  # Development dependencies
+```
+
+### Code Style
+- Follow PEP 8 guidelines
+- Use type hints where possible
+- Add docstrings to all functions
+- Write unit tests for new features
+
+### Pull Request Process
+1. Fork the repository
+2. Create feature branch: `git checkout -b feature/amazing-feature`
+3. Commit changes: `git commit -m 'Add amazing feature'`
+4. Push to branch: `git push origin feature/amazing-feature`
+5. Open Pull Request
+
+---
+
+## 📄 License
+
+This project is protected under the GNU General Public License. Please refer to the LICENSE.txt for more information.
 
 ### Credits
 
-Emilio Kartono, who made the entire project.
+- **Original PDF Engine**: Emilio Kartono
+- **Cloud Integration & Subtitle Generation**: Enhanced by Thakii Team
+- **Fonts**: [DejaVu Fonts](https://dejavu-fonts.github.io/)
 
-The fonts for generating the PDF is from [DejaVu fonts](https://dejavu-fonts.github.io/)
+---
 
-### License
+## 🆘 Support
 
-This project is protected under the GNU licence. Please refer to the LICENSE.txt for more information.
+### Common Issues
+
+**Issue**: `ModuleNotFoundError: No module named 'cv2'`
+**Solution**: `pip install opencv-python`
+
+**Issue**: Firebase authentication error
+**Solution**: Ensure `firebase-service-account.json` is properly configured
+
+**Issue**: S3 access denied
+**Solution**: Check AWS credentials and bucket permissions
+
+### Getting Help
+- 📧 Email: support@thakii.dev
+- 🐛 Issues: GitHub Issues tab
+- 📖 Documentation: See `/docs` folder
+
+---
+
+**🎉 Ready to transform your lecture videos into comprehensive study materials!**

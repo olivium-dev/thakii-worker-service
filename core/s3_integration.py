@@ -13,29 +13,23 @@ load_dotenv()
 
 class WorkerS3Client:
     def __init__(self):
-        self.s3_client = self._initialize_s3()
         self.bucket_name = os.getenv('S3_BUCKET_NAME', 'thakii-video-storage-1753883631')
+        self.s3_client = self._initialize_s3()
     
     def _initialize_s3(self) -> Optional[boto3.client]:
         try:
-            aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-            aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-            aws_region = os.getenv('AWS_DEFAULT_REGION', 'us-east-2')
+            # Try to use AWS CLI default credentials first
+            s3_client = boto3.client('s3')
             
-            if aws_access_key and aws_secret_key:
-                s3_client = boto3.client(
-                    's3',
-                    aws_access_key_id=aws_access_key,
-                    aws_secret_access_key=aws_secret_key,
-                    region_name=aws_region
-                )
-                print(f"✅ S3 client initialized for bucket: {self.bucket_name}")
-                return s3_client
-            else:
-                print("❌ AWS credentials not found")
-                return None
+            # Test the connection
+            s3_client.list_buckets()
+            print(f"✅ S3 client initialized using AWS CLI credentials")
+            print(f"✅ Target bucket: {self.bucket_name}")
+            return s3_client
+            
         except Exception as e:
             print(f"❌ S3 initialization failed: {e}")
+            print("💡 Make sure AWS CLI is configured: aws configure")
             return None
     
     def is_available(self) -> bool:
@@ -46,16 +40,28 @@ class WorkerS3Client:
             return False
         
         try:
-            extensions = ['mp4', 'avi', 'mov', 'mkv']
-            for ext in extensions:
-                s3_key = f"videos/{video_id}/{video_id}.{ext}"
-                try:
+            # First, try to find the actual file in the video_id folder
+            try:
+                # List objects in the video folder to find the actual filename
+                response = self.s3_client.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=f"videos/{video_id}/"
+                )
+                
+                if 'Contents' in response and len(response['Contents']) > 0:
+                    # Use the first (and likely only) file in the folder
+                    s3_key = response['Contents'][0]['Key']
                     self.s3_client.download_file(self.bucket_name, s3_key, local_path)
                     print(f"✅ Video downloaded: {s3_key}")
                     return True
-                except self.s3_client.exceptions.NoSuchKey:
-                    continue
-            return False
+                else:
+                    print(f"❌ No video files found in videos/{video_id}/")
+                    return False
+                    
+            except Exception as list_error:
+                print(f"❌ Error listing S3 objects: {list_error}")
+                return False
+                
         except Exception as e:
             print(f"❌ S3 download error: {e}")
             return False

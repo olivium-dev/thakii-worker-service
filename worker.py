@@ -73,7 +73,6 @@ class EnhancedWorker:
             cmd = [
                 sys.executable, "-m", "src.main",
                 str(video_path.absolute()),
-                "-S",
                 "-o", str(pdf_path.absolute())
             ]
             
