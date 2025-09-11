@@ -247,18 +247,18 @@ jobs:
           ec2-user@vps-71.fds-1.com \
           "cd /home/ec2-user/thakii-worker-service && \
            source venv/bin/activate && \
-           python3 -c 'print(\"🎯 Services verification:\"); \
+           python3 -c 'print(\"Services verification:\"); \
            import sys; print(f\"Python: {sys.version}\"); \
            from core.firestore_integration import firestore_client; \
            from core.s3_integration import s3_client; \
-           print(f\"Firebase: {'✅' if firestore_client.is_available() else '❌'}\"); \
-           print(f\"S3: {'✅' if s3_client.is_available() else '❌'}\"); \
+           print(f\"Firebase: {\"OK\" if firestore_client.is_available() else \"FAIL\"}\"); \
+           print(f\"S3: {\"OK\" if s3_client.is_available() else \"FAIL\"}\"); \
            try: \
                import api_server; \
-               print(\"API Server: ✅\"); \
+               print(\"API Server: OK\"); \
            except Exception as e: \
-               print(f\"API Server: ❌ {e}\"); \
-           print(\"🚀 Deployment verification complete!\")'"
+               print(f\"API Server: FAIL - {e}\"); \
+           print(\"Deployment verification complete!\")'"
 
     - name: 📊 Deployment Summary
       if: always()
