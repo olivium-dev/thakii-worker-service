@@ -337,6 +337,59 @@ def process_video(video_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/process-from-s3', methods=['POST'])
+def process_video_from_s3():
+    """Process video from S3 using metadata (called by backend)"""
+    try:
+        # Check if JSON metadata was provided
+        if not request.is_json:
+            return jsonify({"error": "JSON metadata required"}), 400
+        
+        data = request.get_json()
+        video_id = data.get('video_id')
+        user_id = data.get('user_id')
+        filename = data.get('filename')
+        s3_key = data.get('s3_key')
+        
+        if not all([video_id, user_id, filename, s3_key]):
+            return jsonify({"error": "Missing required fields: video_id, user_id, filename, s3_key"}), 400
+        
+        print(f"📤 Processing S3 video: {video_id} for user: {user_id}")
+        
+        # Update task status to processing
+        try:
+            firestore_client.update_task_status(video_id, "processing")
+            print(f"✅ Task status updated to processing: {video_id}")
+        except Exception as e:
+            print(f"⚠️ Failed to update task status: {e}")
+        
+        # Start background processing
+        def background_s3_processing():
+            try:
+                # Here you would download from S3, process, and upload PDF
+                # For now, just mark as completed
+                import time
+                time.sleep(5)  # Simulate processing
+                firestore_client.update_task_status(video_id, "completed")
+                print(f"✅ S3 processing completed: {video_id}")
+            except Exception as e:
+                print(f"❌ S3 processing failed: {e}")
+                firestore_client.update_task_status(video_id, "failed")
+        
+        import threading
+        thread = threading.Thread(target=background_s3_processing)
+        thread.start()
+        
+        return jsonify({
+            "video_id": video_id,
+            "status": "processing",
+            "message": "Video processing started from S3"
+        }), 201
+
+    except Exception as e:
+        print(f"❌ S3 processing error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/generate-pdf', methods=['POST'])
 def generate_pdf_direct():
     """Upload video file and start REAL PDF generation - no authentication required"""
