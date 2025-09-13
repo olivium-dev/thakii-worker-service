@@ -76,7 +76,7 @@ class EnhancedWorker:
                 "-o", str(pdf_path.absolute())
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)  # 30 minutes for large files
             
             if result.returncode == 0 and pdf_path.exists():
                 size = pdf_path.stat().st_size
