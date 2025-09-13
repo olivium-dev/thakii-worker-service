@@ -40,7 +40,16 @@ class ContentSegmentPdfBuilder:
         """
         with tempfile.TemporaryDirectory() as temp_dir_path:
             pdf = FPDF()
-            pdf.add_font("DejaVu", "", "fonts/DejaVuSansCondensed.ttf", uni=True)
+            
+            # Fix font path for production server
+            import os
+            font_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", "DejaVuSansCondensed.ttf")
+            if not os.path.exists(font_path):
+                print(f"⚠️ Font not found at {font_path}, using default font")
+                # Use default font if custom font not available
+            else:
+                pdf.add_font("DejaVu", "", font_path, uni=True)
+                print(f"✅ Custom font loaded from {font_path}")
 
             for i in range(0, len(pages)):
                 # Temporarily save the frames
@@ -53,9 +62,16 @@ class ContentSegmentPdfBuilder:
                 pdf.image(temp_filepath, w=195)
 
                 # Add the captions if exist
-                if pages[i].text is not None:
-                    pdf.set_font("DejaVu", "", 12)
+                if pages[i].text is not None and pages[i].text.strip():
+                    print(f"📝 Adding text to page {i+1}: {pages[i].text[:50]}...")
+                    try:
+                        pdf.set_font("DejaVu", "", 12)
+                    except:
+                        # Fallback to default font if DejaVu fails
+                        pdf.set_font("Arial", "", 12)
                     pdf.multi_cell(0, 10, pages[i].text)
+                else:
+                    print(f"⚠️ No text for page {i+1}: {repr(pages[i].text)}")
 
             pdf.output(output_filepath, "F")
 
