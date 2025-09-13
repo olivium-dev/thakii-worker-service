@@ -43,12 +43,11 @@ jobs:
         echo "🧪 Running unit tests..."
         python -m unittest discover -s tests -p "test_*.py" -v || echo "⚠️ Some tests failed, continuing deployment..."
 
-    - name: 🔧 Setup Cloudflare Access
+    - name: 🔧 Setup Deployment Tools
       run: |
-        echo "🔧 Installing Cloudflare CLI..."
-        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-        sudo dpkg -i cloudflared-linux-amd64.deb
-        cloudflared version
+        echo "🔧 Installing deployment tools..."
+        sudo apt-get update -qq && sudo apt-get install -y sshpass
+        echo "✅ Deployment tools ready"
 
     - name: 🔑 Setup SSH
       run: |
@@ -56,12 +55,11 @@ jobs:
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
         
-        # Create SSH config for Cloudflare access with password auth
+        # Create SSH config for direct access with password auth
         cat > ~/.ssh/config << EOF
         Host production-server
           HostName vps-71.fds-1.com
           User ec2-user
-          ProxyCommand cloudflared access ssh --hostname %h
           StrictHostKeyChecking no
           UserKnownHostsFile /dev/null
           PasswordAuthentication yes
@@ -234,8 +232,8 @@ jobs:
         echo "🔐 Installing sshpass and connecting to production server..."
         sudo apt-get update -qq && sudo apt-get install -y sshpass
         
-        # Execute deployment via SSH with password authentication
-        sshpass -p "$SSH_PASSWORD" ssh -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "
+        # Execute SIMPLE deployment via SSH (NO Cloudflare/Nginx changes)
+        sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "
         cd /home/ec2-user/thakii-worker-service &&
         git pull origin main &&
         source venv/bin/activate &&
@@ -252,7 +250,7 @@ jobs:
         SSH_PASSWORD: ${{ secrets.thakii_ssh_password }}
       run: |
         echo "🔍 Verifying deployment..."
-        sshpass -p "$SSH_PASSWORD" ssh -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "cd /home/ec2-user/thakii-worker-service && source venv/bin/activate && python3 -c 'from core.firestore_integration import firestore_client; print(\"Firebase:\", firestore_client.is_available())' && sudo systemctl status thakii-worker.service --no-pager"
+        sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "cd /home/ec2-user/thakii-worker-service && source venv/bin/activate && python3 -c 'from core.firestore_integration import firestore_client; print(\"Firebase:\", firestore_client.is_available())' && sudo systemctl status thakii-worker.service --no-pager"
 
     - name: 📊 Deployment Summary
       if: always()
