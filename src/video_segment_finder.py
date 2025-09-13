@@ -50,10 +50,10 @@ class VideoSegmentFinder:
         Is the min. number of pixel changes between two adjacent video frames for the two to be considered distinct
     """
 
-    def __init__(self, threshold=50, min_change=200000, min_segment_duration=15000):
-        self.threshold = threshold              # Much higher threshold - very insensitive to changes
-        self.min_change = min_change           # Much higher - extremely insensitive  
-        self.min_segment_duration = min_segment_duration  # Minimum 15 seconds per segment
+    def __init__(self, threshold=25, min_change=30000, min_segment_duration=3000):
+        self.threshold = threshold              # Balanced threshold - detects meaningful changes
+        self.min_change = min_change           # Balanced sensitivity for change detection
+        self.min_segment_duration = min_segment_duration  # Minimum 3 seconds per segment
 
     def get_best_segment_frames(self, video_file):
         ''' Finds a list of best possible video segments 
