@@ -366,15 +366,21 @@ def process_video_from_s3():
         # Start background processing
         def background_s3_processing():
             try:
-                # Here you would download from S3, process, and upload PDF
-                # For now, just mark as completed
-                import time
-                time.sleep(5)  # Simulate processing
-                firestore_client.update_task_status(video_id, "completed")
-                print(f"✅ S3 processing completed: {video_id}")
+                print(f"🎬 Starting REAL enhanced processing for video {video_id}")
+                
+                # Use REAL enhanced worker logic instead of mock
+                from worker import EnhancedWorker
+                worker = EnhancedWorker()
+                success = worker.process_video(video_id)
+                
+                if success:
+                    print(f"✅ REAL enhanced processing completed: {video_id}")
+                else:
+                    print(f"❌ REAL processing failed: {video_id}")
+                    
             except Exception as e:
-                print(f"❌ S3 processing failed: {e}")
-                firestore_client.update_task_status(video_id, "failed")
+                print(f"❌ Real processing failed: {e}")
+                firestore_client.update_task_status(video_id, "failed", error=str(e))
         
         import threading
         thread = threading.Thread(target=background_s3_processing)

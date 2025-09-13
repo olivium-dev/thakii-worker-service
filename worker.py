@@ -116,10 +116,23 @@ def main():
     worker = EnhancedWorker()
     
     if len(sys.argv) > 1:
-        # Process single video
-        video_id = sys.argv[1]
-        success = worker.process_video(video_id)
-        sys.exit(0 if success else 1)
+        command = sys.argv[1]
+        
+        if command == "--process-all":
+            print("🔄 Processing all pending tasks from Firebase...")
+            # Run polling loop for all pending tasks
+            worker.run_polling_loop()
+        elif command == "--health-check":
+            print("🏥 Running health check...")
+            print(f"   Firestore: {'✅' if worker.firestore.is_available() else '❌'}")
+            print(f"   S3: {'✅' if worker.s3.is_available() else '❌'}")
+            sys.exit(0)
+        else:
+            # Process single video
+            video_id = command
+            print(f"🎯 Processing single video: {video_id}")
+            success = worker.process_video(video_id)
+            sys.exit(0 if success else 1)
     else:
         # Run polling loop
         worker.run_polling_loop()
