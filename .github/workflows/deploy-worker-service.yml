@@ -140,7 +140,7 @@ jobs:
         
         # Setup Firebase service account
         echo "🔥 Setting up Firebase credentials..."
-        echo '${FIREBASE_SERVICE_ACCOUNT}' > firebase-service-account.json
+        echo "${FIREBASE_SERVICE_ACCOUNT}" > firebase-service-account.json
         chmod 600 firebase-service-account.json
         
         # Test the worker service and API server
