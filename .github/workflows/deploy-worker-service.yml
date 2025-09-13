@@ -204,10 +204,18 @@ jobs:
         WantedBy=multi-user.target
         APISERVICEEOF
         
-        # Reload systemd and enable services
+        # Reload systemd and restart services with new configuration
         sudo systemctl daemon-reload
         sudo systemctl enable thakii-worker.service
         sudo systemctl enable thakii-api.service
+        
+        # CRITICAL: Restart services to use new Firebase configuration
+        echo "🔄 Restarting services with new configuration..."
+        sudo systemctl restart thakii-worker.service
+        sudo systemctl restart thakii-api.service
+        
+        # Wait for services to start
+        sleep 10
         
         echo "🎉 Deployment completed successfully!"
         echo "📊 Services status:"
