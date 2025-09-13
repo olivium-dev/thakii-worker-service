@@ -35,10 +35,9 @@ jobs:
     - name: 📦 Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # Install essential packages for worker service and API server including Whisper
-        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS openai-whisper
-        # Install CPU-only PyTorch to save space
-        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        # Install essential packages for worker service and API server (without Whisper for now due to space constraints)
+        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS
+        # TODO: Add Whisper back when server has more space or use cloud-based speech-to-text
 
     - name: 🧪 Run Tests
       run: |
@@ -127,11 +126,10 @@ jobs:
         source venv/bin/activate
         
         # Install dependencies
-        echo "📦 Installing essential dependencies for worker service and API server including Whisper..."
+        echo "📦 Installing essential dependencies for worker service and API server (without Whisper for now due to space constraints)..."
         pip install --upgrade pip
-        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS openai-whisper
-        # Install CPU-only PyTorch to save space
-        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS
+        # TODO: Add Whisper back when server has more space or use cloud-based speech-to-text
         
         # Setup environment variables
         echo "⚙️ Configuring environment..."

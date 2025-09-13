@@ -89,6 +89,10 @@ class CommandLineArgRunner:
                     print(f"✅ Real transcription saved to: {srt_path}")
                     subtitle_parser = SubtitleSRTParser(srt_path)
                     
+                except ImportError as e:
+                    print(f"⚠️ Whisper/PyTorch not available: {e}")
+                    print("🔄 Using enhanced subtitle generator with improved segmentation...")
+                    subtitle_parser = SubtitleGenerator(video_filepath)
                 except Exception as e:
                     print(f"⚠️ Whisper transcription failed: {e}")
                     print("🔄 Falling back to enhanced subtitle generator...")
