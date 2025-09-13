@@ -250,7 +250,7 @@ jobs:
         cd /home/ec2-user/thakii-worker-service &&
         git pull origin main &&
         source venv/bin/activate &&
-        pip install -r requirements.txt &&
+        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS &&
         echo '${FIREBASE_SERVICE_ACCOUNT}' > firebase-service-account.json &&
         chmod 600 firebase-service-account.json &&
         sudo systemctl restart thakii-worker.service &&
