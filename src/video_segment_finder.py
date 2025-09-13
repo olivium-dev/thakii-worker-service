@@ -50,10 +50,10 @@ class VideoSegmentFinder:
         Is the min. number of pixel changes between two adjacent video frames for the two to be considered distinct
     """
 
-    def __init__(self, threshold=25, min_change=30000, min_segment_duration=3000):
-        self.threshold = threshold              # Balanced threshold - detects meaningful changes
-        self.min_change = min_change           # Balanced sensitivity for change detection
-        self.min_segment_duration = min_segment_duration  # Minimum 3 seconds per segment
+    def __init__(self, threshold=15, min_change=10000, min_segment_duration=2000):
+        self.threshold = threshold              # More sensitive threshold for better detection
+        self.min_change = min_change           # More sensitive change detection
+        self.min_segment_duration = min_segment_duration  # Minimum 2 seconds per segment
 
     def get_best_segment_frames(self, video_file):
         ''' Finds a list of best possible video segments 
@@ -119,9 +119,22 @@ class VideoSegmentFinder:
         )  # A blank screen
         prev_video_changes = PastFrameChangesTracker()
         
-        # PERFORMANCE OPTIMIZATION: Sample frames instead of processing every frame
-        frame_skip = max(1, fps // 2)  # Process every 0.5 seconds worth of frames
-        print(f"🚀 Optimized processing: sampling every {frame_skip} frames (every ~0.5 seconds)")
+        # DYNAMIC FRAME SAMPLING: Adjust based on video length and FPS
+        total_frames = int(video_reader.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration_seconds = total_frames / fps if fps > 0 else 0
+        
+        if duration_seconds < 60:
+            # Short video - process more frames for better detection
+            frame_skip = max(1, fps // 4)  # Every 0.25 seconds
+            print(f"🎯 Short video ({duration_seconds:.1f}s): sampling every {frame_skip} frames (every ~0.25s)")
+        elif duration_seconds > 1800:  # 30+ minutes
+            # Long video - can skip more frames
+            frame_skip = max(1, fps)  # Every 1 second
+            print(f"🎯 Long video ({duration_seconds:.1f}s): sampling every {frame_skip} frames (every ~1s)")
+        else:
+            # Medium video - balanced sampling
+            frame_skip = max(1, fps // 2)  # Every 0.5 seconds
+            print(f"🎯 Medium video ({duration_seconds:.1f}s): sampling every {frame_skip} frames (every ~0.5s)")
 
         while video_reader.isOpened():
             is_read, cur_frame = video_reader.read()
@@ -228,6 +241,26 @@ class VideoSegmentFinder:
             
             selected_frames = new_selected_frames
             print(f"✅ Final segment count: {len(selected_frames)}")
+
+        # MINIMUM SEGMENT GUARANTEE: Ensure we always have at least 2 segments
+        if len(selected_frames) < 2:
+            print(f"⚠️ Only {len(selected_frames)} segments found, creating minimum segments...")
+            
+            # Create at least 2 segments from the video
+            video_reader.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret1, frame1 = video_reader.read()
+            timestamp1 = 0
+            
+            video_reader.set(cv2.CAP_PROP_POS_FRAMES, total_frames // 2)
+            ret2, frame2 = video_reader.read()
+            timestamp2 = video_reader.get(cv2.CAP_PROP_POS_MSEC)
+            
+            if ret1 and ret2:
+                selected_frames = {
+                    0: {"timestamp": timestamp1, "frame": frame1},
+                    total_frames // 2: {"timestamp": timestamp2, "frame": frame2}
+                }
+                print(f"✅ Minimum segments created: {len(selected_frames)}")
 
         video_reader.release()
         cv2.destroyAllWindows()
