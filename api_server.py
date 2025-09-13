@@ -36,11 +36,31 @@ print("✅ Firebase integration loaded - Local storage disabled")
 # Local task storage for API server (fallback when Firebase unavailable)
 tasks_storage = {}
 
+def cleanup_local_files(video_id):
+    """Clean up local video and PDF files for a video_id"""
+    try:
+        video_path = Path(f"{video_id}.mp4")
+        pdf_path = Path(f"{video_id}.pdf")
+        
+        cleaned_files = []
+        for file_path in [video_path, pdf_path]:
+            if file_path.exists():
+                file_path.unlink()
+                cleaned_files.append(str(file_path))
+                print(f"🧹 Cleaned up: {file_path}")
+        
+        if cleaned_files:
+            print(f"✅ Storage cleanup completed for {video_id}: {len(cleaned_files)} files removed")
+        
+    except Exception as e:
+        print(f"⚠️ Storage cleanup error for {video_id}: {e}")
+
 def real_video_processing(video_id, video_path):
     """
     Real video processing function that runs in background
     Integrates with actual src/main.py logic
     """
+    output_pdf = None
     try:
         print(f"🎬 Starting REAL processing for video {video_id}")
         # Update status in Firebase
@@ -98,6 +118,9 @@ def real_video_processing(video_id, video_path):
             print(f"✅ Updated Firebase status to failed: {video_id}")
         except Exception as e2:
             print(f"⚠️ Failed to update Firebase status: {e2}")
+    finally:
+        # Always clean up local files after processing (success or failure)
+        cleanup_local_files(video_id)
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -328,6 +351,21 @@ def process_video(video_id):
         processing_thread.daemon = True
         processing_thread.start()
         
+        # Schedule cleanup of the local video file (PDF cleanup handled in processing)
+        def delayed_cleanup():
+            import time
+            time.sleep(60)  # Wait 1 minute for processing to start
+            try:
+                if video_path.exists():
+                    video_path.unlink()
+                    print(f"🧹 Cleaned up local video: {video_path}")
+            except Exception as e:
+                print(f"⚠️ Failed to cleanup local video: {e}")
+        
+        cleanup_thread = threading.Thread(target=delayed_cleanup)
+        cleanup_thread.daemon = True
+        cleanup_thread.start()
+        
         return jsonify({
             "video_id": video_id,
             "status": "processing",
@@ -451,6 +489,21 @@ def generate_pdf_direct():
         )
         processing_thread.daemon = True
         processing_thread.start()
+        
+        # Schedule cleanup of the uploaded video file (PDF cleanup handled in processing)
+        def delayed_cleanup():
+            import time
+            time.sleep(60)  # Wait 1 minute for processing to start
+            try:
+                if video_path.exists():
+                    video_path.unlink()
+                    print(f"🧹 Cleaned up uploaded video: {video_path}")
+            except Exception as e:
+                print(f"⚠️ Failed to cleanup uploaded video: {e}")
+        
+        cleanup_thread = threading.Thread(target=delayed_cleanup)
+        cleanup_thread.daemon = True
+        cleanup_thread.start()
         
         # Return immediate response (async processing started)
         return jsonify({
