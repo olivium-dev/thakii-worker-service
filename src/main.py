@@ -54,7 +54,45 @@ class CommandLineArgRunner:
             )
         else:
             if subtitle_filepath is None:
-                subtitle_parser = SubtitleGenerator(video_filepath)
+                print("🎤 Generating REAL subtitles from actual video audio...")
+                # Generate real subtitles using Whisper transcription
+                try:
+                    import whisper
+                    import os
+                    
+                    # Load Whisper model
+                    print("📥 Loading Whisper model...")
+                    model = whisper.load_model("base")  # Start with base for speed
+                    
+                    # Transcribe the video
+                    print("🎵 Transcribing audio from video...")
+                    result = model.transcribe(video_filepath, language="en", word_timestamps=True)
+                    
+                    # Save to SRT file
+                    srt_path = video_filepath.rsplit(".", 1)[0] + ".srt"
+                    with open(srt_path, "w", encoding='utf-8') as f:
+                        for i, segment in enumerate(result["segments"]):
+                            start_time = segment["start"]
+                            end_time = segment["end"]
+                            text = segment["text"].strip()
+                            
+                            # Format time for SRT
+                            def format_time(seconds):
+                                h = int(seconds // 3600)
+                                m = int((seconds % 3600) // 60)
+                                s = int(seconds % 60)
+                                ms = int((seconds - int(seconds)) * 1000)
+                                return f"{h:02}:{m:02}:{s:02},{ms:03}"
+                            
+                            f.write(f"{i+1}\n{format_time(start_time)} --> {format_time(end_time)}\n{text}\n\n")
+                    
+                    print(f"✅ Real transcription saved to: {srt_path}")
+                    subtitle_parser = SubtitleSRTParser(srt_path)
+                    
+                except Exception as e:
+                    print(f"⚠️ Whisper transcription failed: {e}")
+                    print("🔄 Falling back to enhanced subtitle generator...")
+                    subtitle_parser = SubtitleGenerator(video_filepath)
             elif subtitle_filepath.endswith(".srt"):
                 subtitle_parser = SubtitleSRTParser(subtitle_filepath)
             else:

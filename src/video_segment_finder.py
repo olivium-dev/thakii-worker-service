@@ -50,9 +50,10 @@ class VideoSegmentFinder:
         Is the min. number of pixel changes between two adjacent video frames for the two to be considered distinct
     """
 
-    def __init__(self, threshold=20, min_change=10000):
-        self.threshold = threshold
-        self.min_change = min_change
+    def __init__(self, threshold=50, min_change=200000, min_segment_duration=15000):
+        self.threshold = threshold              # Much higher threshold - very insensitive to changes
+        self.min_change = min_change           # Much higher - extremely insensitive  
+        self.min_segment_duration = min_segment_duration  # Minimum 15 seconds per segment
 
     def get_best_segment_frames(self, video_file):
         ''' Finds a list of best possible video segments 
@@ -117,10 +118,19 @@ class VideoSegmentFinder:
             (frame_height, frame_width, 3), np.uint8
         )  # A blank screen
         prev_video_changes = PastFrameChangesTracker()
+        
+        # PERFORMANCE OPTIMIZATION: Sample frames instead of processing every frame
+        frame_skip = max(1, fps // 2)  # Process every 0.5 seconds worth of frames
+        print(f"🚀 Optimized processing: sampling every {frame_skip} frames (every ~0.5 seconds)")
 
         while video_reader.isOpened():
             is_read, cur_frame = video_reader.read()
             timestamp = video_reader.get(cv2.CAP_PROP_POS_MSEC)
+            
+            # Skip frames for performance
+            if frame_num % frame_skip != 0:
+                frame_num += 1
+                continue
 
             # Is when the stream is ending
             if not is_read:
@@ -167,22 +177,57 @@ class VideoSegmentFinder:
             "num_pixels_changed": 0,
         }
 
-        # Rare case: if there are two selected frames s.t. they differ by 1 second, then there is a glitch
-        # and we pick the frame that is the earliest
+        # Enhanced segment filtering: ensure minimum segment duration and remove glitches
         selected_frame_nums = sorted(selected_frames.keys())
-        i = 0
-        while i < len(selected_frame_nums) - 1:
-            cur_frame = selected_frames[selected_frame_nums[i]]
-            next_frame = selected_frames[selected_frame_nums[i + 1]]
-
-            if (next_frame["timestamp"] - cur_frame["timestamp"]) < 2000:
-                del selected_frames[selected_frame_nums[i + 1]]
-                i += 1
-
-            i += 1
+        frames_to_remove = []
+        
+        for i in range(len(selected_frame_nums) - 1):
+            cur_frame_num = selected_frame_nums[i]
+            next_frame_num = selected_frame_nums[i + 1]
+            
+            if cur_frame_num in selected_frames and next_frame_num in selected_frames:
+                cur_frame = selected_frames[cur_frame_num]
+                next_frame = selected_frames[next_frame_num]
+                
+                # Remove segments that are too short (less than min_segment_duration)
+                time_diff = next_frame["timestamp"] - cur_frame["timestamp"]
+                if time_diff < self.min_segment_duration:
+                    print(f"🔧 Removing short segment: {time_diff}ms < {self.min_segment_duration}ms minimum")
+                    frames_to_remove.append(next_frame_num)
+        
+        # Remove the marked frames
+        for frame_num in frames_to_remove:
+            if frame_num in selected_frames:
+                del selected_frames[frame_num]
 
         # Edge case: delete the first selected frame since it is just a blank screen
-        del selected_frames[selected_frame_nums[0]]
+        updated_frame_nums = sorted(selected_frames.keys())
+        if updated_frame_nums and updated_frame_nums[0] in selected_frames:
+            del selected_frames[updated_frame_nums[0]]
+
+        # CRITICAL: Limit maximum number of segments to prevent fragmentation
+        max_segments = 10  # Maximum 10 segments for better text coherence
+        if len(selected_frames) > max_segments:
+            print(f"🔧 Reducing {len(selected_frames)} segments to {max_segments} for better text coherence")
+            
+            # Keep evenly distributed segments
+            frame_nums = sorted(selected_frames.keys())
+            keep_every = len(frame_nums) // max_segments
+            
+            new_selected_frames = {}
+            for i in range(0, len(frame_nums), keep_every):
+                if len(new_selected_frames) >= max_segments:
+                    break
+                frame_num = frame_nums[i]
+                new_selected_frames[frame_num] = selected_frames[frame_num]
+            
+            # Always keep the last frame
+            if frame_nums:
+                last_frame = frame_nums[-1]
+                new_selected_frames[last_frame] = selected_frames[last_frame]
+            
+            selected_frames = new_selected_frames
+            print(f"✅ Final segment count: {len(selected_frames)}")
 
         video_reader.release()
         cv2.destroyAllWindows()

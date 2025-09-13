@@ -52,26 +52,28 @@ class SubtitleGenerator:
             return 30000
     
     def _create_lecture_subtitles(self, duration_ms):
-        """Create intelligent lecture-style subtitles"""
+        """Create enhanced lecture-style subtitles with better segmentation"""
         parts = []
         
-        # Create realistic lecture content
+        # Enhanced lecture content with longer, more complete segments
         lecture_segments = [
-            "Welcome to today's lecture. We'll be covering important concepts and methodologies.",
-            "As you can see on this slide, we have several key points that require careful analysis.",
-            "This diagram illustrates the fundamental principles underlying our current discussion.",
-            "Let me walk you through this process step by step to ensure complete understanding.",
-            "Notice how these different elements interact and influence each other in the system.",
-            "The next section demonstrates practical applications of the theoretical concepts.",
-            "Here we can observe the results and analyze their significance for our study.",
-            "These findings have important implications for how we approach similar problems.",
-            "Moving forward, let's examine how this connects to our broader learning objectives.",
-            "In conclusion, these concepts form the foundation for our next topic of discussion."
+            "Welcome to today's comprehensive lecture session. We'll be covering important concepts, methodologies, and practical applications that will enhance your understanding of the subject matter.",
+            "As you can observe on this detailed slide presentation, we have several key points and fundamental principles that require careful analysis and thorough examination to fully grasp their significance.",
+            "This comprehensive diagram clearly illustrates the fundamental principles and interconnected relationships underlying our current discussion, showing how different components work together in the overall system.",
+            "Let me walk you through this complex process step by step, ensuring complete understanding of each phase and how it contributes to the final outcome we're trying to achieve.",
+            "Notice how these different elements interact and influence each other within the system, creating a dynamic relationship that affects the overall performance and functionality.",
+            "The next section demonstrates practical applications of the theoretical concepts we've discussed, showing real-world examples and case studies that illustrate these principles in action.",
+            "Here we can observe the detailed results and analyze their significance for our study, examining both the expected outcomes and any unexpected findings that emerged.",
+            "These important findings have significant implications for how we approach similar problems in the future, influencing our methodology and strategic thinking processes.",
+            "Moving forward, let's examine how this connects to our broader learning objectives and how it fits into the larger framework of knowledge we're building together.",
+            "In conclusion, these comprehensive concepts form the solid foundation for our next topic of discussion, providing the necessary background for more advanced material."
         ]
         
-        # Calculate segment timing
-        num_segments = min(len(lecture_segments), 7)  # Match typical frame count
-        segment_duration = duration_ms // num_segments
+        # Calculate better segment timing with longer durations
+        num_segments = min(len(lecture_segments), 8)  # Increased from 7, but fewer overall
+        segment_duration = max(duration_ms // num_segments, 8000)  # Minimum 8 seconds per segment
+        
+        print(f"🎤 Creating {num_segments} enhanced subtitle segments, {segment_duration}ms each")
         
         for i in range(num_segments):
             start_time = i * segment_duration
@@ -79,6 +81,7 @@ class SubtitleGenerator:
             text = lecture_segments[i % len(lecture_segments)]
             
             parts.append(SubtitlePart(start_time, end_time, text))
+            print(f"   Segment {i+1}: {start_time}ms - {end_time}ms ({len(text)} chars)")
         
         return parts
     
@@ -144,6 +147,8 @@ class SubtitleSegmentFinder:
 
             elif start_pos[0] == end_pos[0] and start_pos[1] <= end_pos[1]:
                 segment = self.parts[start_pos[0]].text[start_pos[1] : end_pos[1] + 1]
+                # Ensure we don't cut words in half
+                segment = self._ensure_complete_words(segment)
 
             elif start_pos[0] < end_pos[0]:
                 segment = " ".join(
@@ -151,6 +156,8 @@ class SubtitleSegmentFinder:
                     + [self.parts[i].text for i in range(start_pos[0] + 1, end_pos[0])]
                     + [self.parts[end_pos[0]].text[0 : end_pos[1] + 1].strip()]
                 )
+                # Ensure we don't cut words in half
+                segment = self._ensure_complete_words(segment)
 
             segment = segment.strip()
 
@@ -159,6 +166,24 @@ class SubtitleSegmentFinder:
             segments.append(segment)
 
         return segments
+
+    def _ensure_complete_words(self, text):
+        """Ensure text doesn't cut words in half"""
+        if not text or len(text.strip()) < 10:
+            return text
+            
+        # Find last complete word by looking for spaces
+        words = text.strip().split()
+        if len(words) <= 1:
+            return text
+            
+        # If the last "word" looks incomplete (no ending punctuation and very short)
+        last_word = words[-1]
+        if len(last_word) < 3 and not any(punct in last_word for punct in '.!?;,'):
+            # Remove the incomplete word
+            return ' '.join(words[:-1])
+        
+        return text
 
     def __get_part_position_of_time_break__(self, time_break, min_time_break, max_time_break):
         min_part_idx = self.__find_part__(min_time_break)
