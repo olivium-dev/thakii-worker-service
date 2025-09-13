@@ -33,6 +33,9 @@ app = Flask(__name__)
 from core.firestore_integration import firestore_client
 print("✅ Firebase integration loaded - Local storage disabled")
 
+# Local task storage for API server (fallback when Firebase unavailable)
+tasks_storage = {}
+
 def real_video_processing(video_id, video_path):
     """
     Real video processing function that runs in background
