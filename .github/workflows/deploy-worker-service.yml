@@ -253,6 +253,9 @@ jobs:
         pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS &&
         echo "${FIREBASE_SERVICE_ACCOUNT}" > firebase-service-account.json &&
         chmod 600 firebase-service-account.json &&
+        echo "FIREBASE_SERVICE_ACCOUNT_KEY=./firebase-service-account.json" > .env &&
+        echo "GOOGLE_CLOUD_PROJECT=thakii-973e3" >> .env &&
+        echo "FIREBASE_PROJECT_ID=thakii-973e3" >> .env &&
         sudo systemctl restart thakii-worker.service &&
         sudo systemctl restart thakii-api.service &&
         echo '✅ Worker services updated and restarted'
