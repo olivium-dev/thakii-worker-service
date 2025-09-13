@@ -1,0 +1,928 @@
+1
+00:00:00,000 --> 00:00:02,180
+So now that we understand what a secure PRG is,
+
+2
+00:00:02,319 --> 00:00:04,120
+and we understand what semantic security means,
+
+3
+00:00:04,500 --> 00:00:06,400
+we can actually argue that a stream cipher
+
+4
+00:00:06,400 --> 00:00:09,119
+with a secure PRG is, in fact, a manically secure.
+
+5
+00:00:09,560 --> 00:00:11,259
+So that's our goal for this segment.
+
+6
+00:00:11,460 --> 00:00:12,919
+It's a fairly straightforward proof,
+
+7
+00:00:13,240 --> 00:00:14,140
+and we'll see how it goes.
+
+8
+00:00:15,000 --> 00:00:16,120
+So the theorem we want to prove
+
+9
+00:00:16,120 --> 00:00:18,300
+is that basically given a generator G
+
+10
+00:00:18,300 --> 00:00:21,140
+that happens to be a secure pseudorant generator,
+
+11
+00:00:21,780 --> 00:00:23,559
+in fact, the stream cipher that's derived
+
+12
+00:00:23,559 --> 00:00:25,920
+from this generator is going to be semantically secure.
+
+13
+00:00:26,480 --> 00:00:27,379
+Okay, and I want to emphasize
+
+14
+00:00:27,939 --> 00:00:30,219
+that there was no hope of proving a theorem like this
+
+15
+00:00:30,219 --> 00:00:33,579
+for perfect secrecy, for Shannon's concept of perfect secrecy,
+
+16
+00:00:33,960 --> 00:00:36,259
+because we know that a stream cipher cannot be perfectly
+
+17
+00:00:36,259 --> 00:00:38,259
+secure because it has short keys.
+
+18
+00:00:38,859 --> 00:00:40,340
+And perfect secrecy requires keys
+
+19
+00:00:40,340 --> 00:00:41,420
+to be as long as the message.
+
+20
+00:00:42,200 --> 00:00:43,939
+So this is really kind of the first example
+
+21
+00:00:43,939 --> 00:00:46,420
+that we see where we're able to prove
+
+22
+00:00:46,420 --> 00:00:49,280
+that a cipher with short keys has security,
+
+23
+00:00:49,719 --> 00:00:51,700
+the concept of security is semantic security,
+
+24
+00:00:52,060 --> 00:00:53,700
+and this actually validates that really,
+
+25
+00:00:53,700 --> 00:00:55,240
+this is a very useful concept,
+
+26
+00:00:55,240 --> 00:00:57,600
+and in fact, we'll be using semantic security
+
+27
+00:00:57,600 --> 00:00:59,119
+many, many times throughout the course.
+
+28
+00:00:59,799 --> 00:01:01,600
+Okay, so how do we prove a theorem like this?
+
+29
+00:01:02,039 --> 00:01:03,380
+What we're actually going to be doing
+
+30
+00:01:03,380 --> 00:01:05,239
+is we're going to be proving the contour positive.
+
+31
+00:01:05,700 --> 00:01:06,959
+What we're going to show is the following.
+
+32
+00:01:07,040 --> 00:01:08,359
+We're going to prove the statement down here,
+
+33
+00:01:08,359 --> 00:01:09,459
+but let me parse it for you.
+
+34
+00:01:09,859 --> 00:01:13,500
+Suppose you give me a semantic security adversary A,
+
+35
+00:01:14,579 --> 00:01:18,500
+what we'll do is we'll build PRG adversary B
+
+36
+00:01:18,500 --> 00:01:20,439
+that satisfies this inequality here.
+
+37
+00:01:20,760 --> 00:01:21,980
+Now, why is this inequality useful?
+
+38
+00:01:22,560 --> 00:01:23,480
+Basically, what do we know?
+
+39
+00:01:23,480 --> 00:01:26,459
+We know that if B is an efficient adversary,
+
+40
+00:01:27,219 --> 00:01:29,760
+then we know that since G is a secure generator,
+
+41
+00:01:30,359 --> 00:01:33,400
+we know that this advantage is negligible, right?
+
+42
+00:01:33,560 --> 00:01:36,159
+A secure generator has a negligible advantage
+
+43
+00:01:36,159 --> 00:01:38,659
+against any efficient statistical test.
+
+44
+00:01:39,040 --> 00:01:41,340
+So the right hand side basically is going to be negligible,
+
+45
+00:01:41,340 --> 00:01:43,019
+but because the right hand side is negligible,
+
+46
+00:01:43,379 --> 00:01:45,519
+we can deduce that the left hand side is negligible,
+
+47
+00:01:45,799 --> 00:01:48,180
+and therefore the adversary that you looked at
+
+48
+00:01:48,180 --> 00:01:49,900
+actually has negligible advantage
+
+49
+00:01:49,900 --> 00:01:51,939
+in attacking the stream side for E.
+
+50
+00:01:52,379 --> 00:01:54,239
+Okay, so this is how this will work.
+
+51
+00:01:54,560 --> 00:01:56,700
+Basically, all we have to do is give it an adversary A,
+
+52
+00:01:57,140 --> 00:01:58,420
+we're going to build an adversary B.
+
+53
+00:01:58,879 --> 00:02:01,540
+We know that B has negligible advantage against a generator,
+
+54
+00:02:02,040 --> 00:02:04,359
+but that implies that A has negligible advantage
+
+55
+00:02:04,359 --> 00:02:05,400
+against a stream side.
+
+56
+00:02:05,939 --> 00:02:07,180
+Okay, so let's do that.
+
+57
+00:02:07,299 --> 00:02:10,099
+So all we have to do again is give an A, we have to build B.
+
+58
+00:02:10,560 --> 00:02:12,439
+So let A be a semantic security adversary
+
+59
+00:02:12,439 --> 00:02:13,979
+against the stream side for it.
+
+60
+00:02:14,060 --> 00:02:15,300
+So let me remind you what that means.
+
+61
+00:02:15,879 --> 00:02:17,419
+Basically, there's this challenger,
+
+62
+00:02:17,520 --> 00:02:19,699
+the challenger starts off by choosing a key K,
+
+63
+00:02:20,339 --> 00:02:22,740
+and then the adversary is going to output two messages,
+
+64
+00:02:23,020 --> 00:02:23,879
+two equal length messages,
+
+65
+00:02:24,360 --> 00:02:27,280
+and he's going to receive the encryption of M zero or M one,
+
+66
+00:02:27,379 --> 00:02:28,340
+and then he outputs B prime.
+
+67
+00:02:28,879 --> 00:02:31,099
+Okay, that's what a semantic security adversary is going to do.
+
+68
+00:02:31,719 --> 00:02:34,139
+So now we're going to start playing games with this adversary,
+
+69
+00:02:34,560 --> 00:02:36,879
+and that's how we're going to prove our lemma.
+
+70
+00:02:37,759 --> 00:02:39,280
+All right, so the first thing we're going to do
+
+71
+00:02:39,280 --> 00:02:43,680
+is we're going to make the challenger also choose a random R.
+
+72
+00:02:44,099 --> 00:02:45,139
+Okay, a random string R.
+
+73
+00:02:45,560 --> 00:02:48,060
+So, well, you know, the adversary doesn't really care
+
+74
+00:02:48,060 --> 00:02:49,699
+what the challenger doesn't turnily.
+
+75
+00:02:49,900 --> 00:02:51,020
+The challenger never uses R,
+
+76
+00:02:51,379 --> 00:02:53,599
+so this doesn't affect the adversary's advantage at all.
+
+77
+00:02:54,180 --> 00:02:55,159
+The adversary just doesn't care
+
+78
+00:02:55,159 --> 00:02:57,060
+that the challenger also picks R.
+
+79
+00:02:57,699 --> 00:02:58,639
+But now comes the trick.
+
+80
+00:02:59,000 --> 00:03:01,979
+What we're going to do is we're instead of encrypting using GK,
+
+81
+00:03:02,419 --> 00:03:03,939
+we're going to encrypt using R.
+
+82
+00:03:04,580 --> 00:03:06,539
+And you can see, basically, what we're doing here,
+
+83
+00:03:06,860 --> 00:03:09,800
+essentially, we're changing the challenger,
+
+84
+00:03:09,979 --> 00:03:12,599
+so now the challenge cypotext is encrypted
+
+85
+00:03:12,599 --> 00:03:16,699
+using a truly random pad as opposed to the pseudo random pad GK.
+
+86
+00:03:17,639 --> 00:03:21,219
+Okay, now the property of the pseudo random generator
+
+87
+00:03:21,219 --> 00:03:24,460
+is that it's output is indistinguishable from truly random.
+
+88
+00:03:25,599 --> 00:03:27,560
+So, because the PRG is secure,
+
+89
+00:03:28,199 --> 00:03:30,439
+the adversary can't tell that we made this change.
+
+90
+00:03:30,699 --> 00:03:32,280
+The adversary can't tell that we switched
+
+91
+00:03:32,280 --> 00:03:35,520
+from a pseudo random string to a truly random string,
+
+92
+00:03:35,879 --> 00:03:37,379
+again, because the generator is secure.
+
+93
+00:03:38,439 --> 00:03:40,560
+Well, but now look at the game that we ended up with.
+
+94
+00:03:40,639 --> 00:03:42,800
+So, the adversary is advantage couldn't have changed by much
+
+95
+00:03:42,800 --> 00:03:44,120
+because he can't tell the difference.
+
+96
+00:03:44,639 --> 00:03:46,159
+But now look at the game that we ended up with.
+
+97
+00:03:46,159 --> 00:03:49,639
+Now, this game is truly a one time pad game.
+
+98
+00:03:50,060 --> 00:03:52,840
+This is a semantic security game against the one time pad
+
+99
+00:03:52,840 --> 00:03:55,219
+because now the adversary is getting a one time pad encryption
+
+100
+00:03:55,219 --> 00:03:58,580
+of M0 or M1, but in the one time pad,
+
+101
+00:03:58,719 --> 00:04:00,780
+we know that the adversary's advantage is zero
+
+102
+00:04:00,780 --> 00:04:02,759
+because you can't beat the one time pad.
+
+103
+00:04:02,860 --> 00:04:05,259
+The one time pad is secure, unconditionally secure.
+
+104
+00:04:05,860 --> 00:04:07,460
+And as a result, because of this,
+
+105
+00:04:07,840 --> 00:04:10,259
+essentially, since the adversary couldn't have
+
+106
+00:04:10,259 --> 00:04:13,659
+tell the difference when we moved from pseudo random to random,
+
+107
+00:04:13,659 --> 00:04:15,680
+but he couldn't win the random game.
+
+108
+00:04:16,019 --> 00:04:18,480
+That also means that he couldn't win the pseudo random game.
+
+109
+00:04:18,920 --> 00:04:21,560
+And as a result, the stream cipher, the original stream cipher
+
+110
+00:04:21,560 --> 00:04:22,620
+must be secure.
+
+111
+00:04:23,100 --> 00:04:25,000
+So, that's the intuition for how the proof is going to go.
+
+112
+00:04:25,480 --> 00:04:27,220
+But I want to do it rigorously once.
+
+113
+00:04:27,500 --> 00:04:30,139
+From now on, we're just going to argue by playing games
+
+114
+00:04:30,139 --> 00:04:30,860
+with a challenger.
+
+115
+00:04:31,460 --> 00:04:34,600
+And we won't be doing things as formal as I'm going to do next.
+
+116
+00:04:35,040 --> 00:04:37,060
+But I want to do formally and precisely once
+
+117
+00:04:37,060 --> 00:04:39,420
+just so that you see how these proofs actually work.
+
+118
+00:04:39,879 --> 00:04:41,480
+Okay, so I'm going to have to introduce some notation.
+
+119
+00:04:42,139 --> 00:04:44,319
+And I'll do the usual notation.
+
+120
+00:04:44,459 --> 00:04:47,000
+Basically, in the original semantic security game,
+
+121
+00:04:47,000 --> 00:04:48,959
+when we're actually using a pseudo random pad,
+
+122
+00:04:49,500 --> 00:04:53,600
+I'm going to use w0 and w1 to denote the event
+
+123
+00:04:53,600 --> 00:04:58,060
+that the adversary outputs one when he gets the encryption of m0
+
+124
+00:04:58,060 --> 00:04:59,899
+or gets the encryption of m1 respectively.
+
+125
+00:05:00,579 --> 00:05:03,459
+Okay, so w0 corresponds to opening one
+
+126
+00:05:03,459 --> 00:05:06,800
+when receiving the encryption of m0 and w1
+
+127
+00:05:06,800 --> 00:05:10,540
+corresponds to opening one when receiving the encryption of m1.
+
+128
+00:05:11,260 --> 00:05:14,639
+So that's the standard definition of semantic security.
+
+129
+00:05:15,459 --> 00:05:18,160
+Now, once we flipped to the random pad,
+
+130
+00:05:18,779 --> 00:05:21,339
+I'm going to use r0 and r1 to denote the event
+
+131
+00:05:21,339 --> 00:05:25,819
+at the adversary outputs one when receiving the one-time pad encryption of m0
+
+132
+00:05:25,819 --> 00:05:27,839
+or the one-time pad encryption of m1.
+
+133
+00:05:28,180 --> 00:05:32,560
+So we have four events, w0, w1 from the original semantic security game,
+
+134
+00:05:32,920 --> 00:05:36,000
+and r0 and r1 from the semantic security game,
+
+135
+00:05:36,139 --> 00:05:37,720
+once we switched over to the one-time pad.
+
+136
+00:05:38,220 --> 00:05:40,560
+So now let's look at the relations between these variables.
+
+137
+00:05:41,240 --> 00:05:43,879
+So first of all, r0 and r1 are basically events
+
+138
+00:05:43,879 --> 00:05:46,860
+from a semantic security game against a one-time pad.
+
+139
+00:05:47,319 --> 00:05:48,860
+So the difference between these probabilities
+
+140
+00:05:49,400 --> 00:05:51,279
+is, as we said, it's basically the advantage
+
+141
+00:05:51,279 --> 00:05:55,139
+of algorithm A of adversary A against a one-time pad,
+
+142
+00:05:55,339 --> 00:05:56,639
+which we know is zero.
+
+143
+00:05:57,360 --> 00:05:57,980
+Okay, so that's great.
+
+144
+00:05:58,120 --> 00:06:00,199
+So that basically means that probability of r0
+
+145
+00:06:00,199 --> 00:06:01,660
+is equal to the probability of r1.
+
+146
+00:06:02,519 --> 00:06:04,759
+So now let's put these events on a line,
+
+147
+00:06:04,759 --> 00:06:07,019
+so a line segment between zero and one.
+
+148
+00:06:07,439 --> 00:06:11,100
+So here are the events w0 and w1 are the events we're interested in.
+
+149
+00:06:11,180 --> 00:06:12,579
+We want to show that these two are close.
+
+150
+00:06:13,560 --> 00:06:16,540
+Okay, and the way we're going to do it is basically by showing,
+
+151
+00:06:16,920 --> 00:06:20,000
+oh, and I should say, well here is probability r0 and r1.
+
+152
+00:06:20,120 --> 00:06:22,360
+And since they're both the same, I just put them in the same place.
+
+153
+00:06:22,699 --> 00:06:26,339
+What we're going to do is we're going to show that both w0 and w1
+
+154
+00:06:26,799 --> 00:06:30,300
+are actually close to the probability of rb,
+
+155
+00:06:30,420 --> 00:06:31,980
+and as a result, they must be close to one another.
+
+156
+00:06:31,980 --> 00:06:35,000
+Okay, so the way we do that is using a second claim.
+
+157
+00:06:35,540 --> 00:06:39,500
+So now we're interested in the distance between probability of w i b and probability of rb.
+
+158
+00:06:40,180 --> 00:06:41,540
+Okay, so we'll prove the claim in a second.
+
+159
+00:06:41,879 --> 00:06:42,980
+Let me just state the claim.
+
+160
+00:06:43,060 --> 00:06:47,540
+The claim says that there exists an adversary b such that the difference between these two
+
+161
+00:06:47,540 --> 00:06:54,160
+probabilities is basically the advantage of b against the generator g.
+
+162
+00:06:54,399 --> 00:06:55,720
+And this is for both b's.
+
+163
+00:06:56,779 --> 00:07:00,240
+Okay, so given these two claims, the theorem is done because basically,
+
+164
+00:07:00,240 --> 00:07:01,139
+what do we know?
+
+165
+00:07:01,240 --> 00:07:06,000
+We know that this distance is now less than the advantage of b against g.
+
+166
+00:07:06,300 --> 00:07:07,240
+That's from claim 2.
+
+167
+00:07:08,019 --> 00:07:10,980
+And similarly, this distance is less, actually it's even equal to,
+
+168
+00:07:11,019 --> 00:07:15,920
+I don't have to say less, it's equal to the advantage of b against g.
+
+169
+00:07:17,019 --> 00:07:22,199
+And as a result, you can see that the distance between w0 and w1 is basically the most twice
+
+170
+00:07:22,720 --> 00:07:24,060
+the advantage of b against g.
+
+171
+00:07:24,420 --> 00:07:25,819
+That's basically the theorem we were trying to prove.
+
+172
+00:07:26,620 --> 00:07:29,800
+Okay, so the only thing that remains is just proving this claim 2.
+
+173
+00:07:29,800 --> 00:07:34,959
+And if you think about what claim 2 says, it's basically captures the question of what happens
+
+174
+00:07:35,480 --> 00:07:43,639
+in experiment 0, what happens when we replace the pseudo random pad gk by a truly random pad r.
+
+175
+00:07:44,300 --> 00:07:44,300
+
+
+176
+00:07:44,620 --> 00:07:51,120
+Here in experiment 0 say we're using a pseudo random pad and here in experiment 0, we're using
+
+177
+00:07:51,120 --> 00:07:52,060
+a truly random pad.
+
+178
+00:07:52,199 --> 00:07:55,259
+And we're asking, can the adversary tell the difference between these two?
+
+179
+00:07:55,620 --> 00:07:58,600
+And we want to argue that he cannot because the generator is secure.
+
+180
+00:07:59,139 --> 00:08:00,620
+Okay, so here's what we're going to do.
+
+181
+00:08:00,879 --> 00:08:02,019
+So let's prove claim 2.
+
+182
+00:08:02,139 --> 00:08:09,319
+So we want to argue that in fact there is a PRG adversary b that has exactly the difference
+
+183
+00:08:09,319 --> 00:08:11,120
+of the two probabilities as it's advantage.
+
+184
+00:08:11,639 --> 00:08:15,920
+Okay, and since the point is, since this is negligible, this is negligible.
+
+185
+00:08:16,579 --> 00:08:18,220
+And that's basically what we wanted to prove.
+
+186
+00:08:19,540 --> 00:08:21,720
+Okay, so let's look at statistical test b.
+
+187
+00:08:22,240 --> 00:08:23,579
+So what is statistical test b?
+
+188
+00:08:23,680 --> 00:08:25,339
+It's going to use adversary a in its belly.
+
+189
+00:08:25,339 --> 00:08:28,199
+So we get to build statistical test b however we want.
+
+190
+00:08:28,600 --> 00:08:32,519
+As we said, it's going to use adversary a inside of it for its operation.
+
+191
+00:08:33,080 --> 00:08:34,240
+And it's a regular statistical test.
+
+192
+00:08:34,379 --> 00:08:38,980
+So it takes an n bit string as inputs and it's supposed to outputs, you know, random or not random.
+
+193
+00:08:39,139 --> 00:08:39,679
+0 or 1.
+
+194
+00:08:40,379 --> 00:08:41,240
+Okay, so let's see.
+
+195
+00:08:41,419 --> 00:08:43,820
+So it's going to first thing it's going to do is it's going to run adversary a.
+
+196
+00:08:44,019 --> 00:08:47,360
+An adversary a is going to output two messages, m0 and m1.
+
+197
+00:08:48,080 --> 00:08:53,460
+And then what adversary b is going to do is basically going to respond with m0 xOR,
+
+198
+00:08:53,460 --> 00:08:55,159
+the string that it was given as inputs.
+
+199
+00:08:55,159 --> 00:08:57,799
+All right, that's the statistical test.
+
+200
+00:08:57,919 --> 00:09:01,620
+And then whatever a outputs, it's going to output as it's output.
+
+201
+00:09:02,259 --> 00:09:03,960
+And now let's look at its advantage.
+
+202
+00:09:04,320 --> 00:09:08,480
+So what can we say about the advantage of the statistical test against the generator?
+
+203
+00:09:09,399 --> 00:09:14,980
+Well, so by definition, it's the probability that if we choose a truly random string,
+
+204
+00:09:15,200 --> 00:09:20,799
+so here r is in 0, 1 to the n, it's the probability that r that b outputs 1,
+
+205
+00:09:21,600 --> 00:09:26,220
+minus the probability that when we choose a pseudo random string, b outputs 1.
+
+206
+00:09:27,200 --> 00:09:27,220
+Okay.
+
+207
+00:09:30,860 --> 00:09:32,379
+Okay, but let's think about what this is.
+
+208
+00:09:32,600 --> 00:09:35,220
+So what can you tell me about the first expression?
+
+209
+00:09:35,360 --> 00:09:37,100
+So what can you tell me about this expression over here?
+
+210
+00:09:38,039 --> 00:09:41,899
+Well, by definition, that's exactly, if you think about what's going on here,
+
+211
+00:09:42,019 --> 00:09:45,879
+that's this is exactly the probability r0, right?
+
+212
+00:09:45,960 --> 00:09:49,559
+Because this game that we're playing with the adversary here is basically,
+
+213
+00:09:49,559 --> 00:09:51,980
+he outputs m0 and 1, right?
+
+214
+00:09:52,120 --> 00:09:53,519
+Here, he output an m0 and 1.
+
+215
+00:09:53,960 --> 00:09:59,399
+And he got the encryption of m0 under a truly one-time pad.
+
+216
+00:10:01,059 --> 00:10:04,019
+Okay, so this is basically a probability of r0.
+
+217
+00:10:04,120 --> 00:10:05,179
+Here, let me write this a little better.
+
+218
+00:10:06,980 --> 00:10:09,299
+So this is basically a probability of r0.
+
+219
+00:10:10,059 --> 00:10:12,440
+Now, what can we say about the next expression?
+
+220
+00:10:12,620 --> 00:10:17,399
+Well, what can we say about what happens when b is given a pseudo random string,
+
+221
+00:10:17,399 --> 00:10:21,740
+y, isn't it? But, well, in that case, this is exactly experiment 0 and the true
+
+222
+00:10:21,740 --> 00:10:22,799
+stream-sipher game.
+
+223
+00:10:23,120 --> 00:10:26,580
+Because now we're computing mxor m0, xor gk.
+
+224
+00:10:27,120 --> 00:10:29,379
+So this is exactly w0.
+
+225
+00:10:30,440 --> 00:10:31,860
+Okay, that's exactly what we have to prove.
+
+226
+00:10:32,000 --> 00:10:33,039
+So it's a kind of a trivial proof.
+
+227
+00:10:33,539 --> 00:10:35,519
+Okay, so that completes the proof of claim 2.
+
+228
+00:10:36,299 --> 00:10:39,460
+And again, just to make sure this is all clear, once we have claim 2,
+
+229
+00:10:39,940 --> 00:10:43,379
+we know that w0 must be close to w1, and that's the theorem.
+
+230
+00:10:43,480 --> 00:10:44,139
+That's what we have to prove.
+
+231
+00:10:44,980 --> 00:10:48,919
+Okay, so now we've established that a stream-sipher is in fact
+
+232
+00:10:48,919 --> 00:10:53,019
+semantically secure, assuming that the PRG is secure.
+
