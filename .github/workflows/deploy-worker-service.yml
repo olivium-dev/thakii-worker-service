@@ -36,7 +36,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         # Install essential packages for worker service and API server including Whisper
-        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS openai-whisper torch
+        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS openai-whisper torch --index-url https://download.pytorch.org/whl/cpu
 
     - name: 🧪 Run Tests
       run: |
@@ -127,7 +127,7 @@ jobs:
         # Install dependencies
         echo "📦 Installing essential dependencies for worker service and API server including Whisper..."
         pip install --upgrade pip
-        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS openai-whisper torch
+        pip install opencv-python numpy fpdf2 firebase-admin google-cloud-firestore boto3 python-dotenv srt webvtt-py Flask Flask-CORS openai-whisper torch --index-url https://download.pytorch.org/whl/cpu
         
         # Setup environment variables
         echo "⚙️ Configuring environment..."
