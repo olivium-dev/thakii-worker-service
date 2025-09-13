@@ -53,20 +53,26 @@ jobs:
         echo "✅ Deployment tools ready"
 
     - name: 🔑 Setup SSH
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.thakii_ssh_private_key }}
       run: |
         echo "🔑 Setting up SSH configuration..."
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
         
-        # Create SSH config for Cloudflare proxy access (required for server)
+        # Setup SSH private key
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/thakii-key
+        chmod 600 ~/.ssh/thakii-key
+        
+        # Create SSH config for Cloudflare proxy access
         cat > ~/.ssh/config << EOF
         Host production-server
           HostName vps-71.fds-1.com
           User ec2-user
+          IdentityFile ~/.ssh/thakii-key
           ProxyCommand cloudflared access ssh --hostname %h
           StrictHostKeyChecking no
           UserKnownHostsFile /dev/null
-          PasswordAuthentication yes
         EOF
         
         chmod 600 ~/.ssh/config
@@ -236,8 +242,8 @@ jobs:
         echo "🔐 Installing sshpass and connecting to production server..."
         sudo apt-get update -qq && sudo apt-get install -y sshpass
         
-        # Execute SIMPLE deployment via SSH (Cloudflare proxy for access only)
-        sshpass -p "$SSH_PASSWORD" ssh -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "
+        # Execute deployment via SSH with private key
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "
         cd /home/ec2-user/thakii-worker-service &&
         git pull origin main &&
         source venv/bin/activate &&
@@ -254,7 +260,7 @@ jobs:
         SSH_PASSWORD: ${{ secrets.thakii_ssh_password }}
       run: |
         echo "🔍 Verifying deployment..."
-        sshpass -p "$SSH_PASSWORD" ssh -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "cd /home/ec2-user/thakii-worker-service && source venv/bin/activate && python3 -c 'from core.firestore_integration import firestore_client; print(\"Firebase:\", firestore_client.is_available())' && sudo systemctl status thakii-worker.service --no-pager"
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "cd /home/ec2-user/thakii-worker-service && source venv/bin/activate && python3 -c 'from core.firestore_integration import firestore_client; print(\"Firebase:\", firestore_client.is_available())' && sudo systemctl status thakii-worker.service --no-pager"
 
     - name: 📊 Deployment Summary
       if: always()
