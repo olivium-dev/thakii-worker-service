@@ -60,9 +60,12 @@ jobs:
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
         
-        # Setup SSH private key
-        echo "$SSH_PRIVATE_KEY" > ~/.ssh/thakii-key
+        # Setup SSH private key with proper format
+        echo "$SSH_PRIVATE_KEY" | base64 -d > ~/.ssh/thakii-key 2>/dev/null || echo "$SSH_PRIVATE_KEY" > ~/.ssh/thakii-key
         chmod 600 ~/.ssh/thakii-key
+        
+        # Validate SSH key
+        ssh-keygen -l -f ~/.ssh/thakii-key || echo "SSH key validation failed"
         
         # Create SSH config for Cloudflare proxy access
         cat > ~/.ssh/config << EOF
