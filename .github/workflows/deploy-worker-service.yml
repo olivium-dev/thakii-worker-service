@@ -50,27 +50,21 @@ jobs:
         sudo dpkg -i cloudflared-linux-amd64.deb
         cloudflared version
 
-    - name: 🔑 Setup SSH Key
-      env:
-        SSH_PRIVATE_KEY: ${{ secrets.thakii_ssh_private_key }}
+    - name: 🔑 Setup SSH
       run: |
         echo "🔑 Setting up SSH configuration..."
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
         
-        # Setup SSH private key
-        echo "$SSH_PRIVATE_KEY" > ~/.ssh/thakii-02-developer-key
-        chmod 600 ~/.ssh/thakii-02-developer-key
-        
-        # Create SSH config for cloudflared proxy
+        # Create SSH config for Cloudflare access with password auth
         cat > ~/.ssh/config << EOF
         Host production-server
           HostName vps-71.fds-1.com
           User ec2-user
-          IdentityFile ~/.ssh/thakii-02-developer-key
           ProxyCommand cloudflared access ssh --hostname %h
           StrictHostKeyChecking no
           UserKnownHostsFile /dev/null
+          PasswordAuthentication yes
         EOF
         
         chmod 600 ~/.ssh/config
@@ -236,14 +230,29 @@ jobs:
         
         chmod +x deploy_script.sh
         
-        # Execute deployment via SSH
-        echo "🔐 Connecting to production server..."
-        ssh -i ~/.ssh/thakii-02-developer-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="cloudflared access ssh --hostname %h" ec2-user@vps-71.fds-1.com "export AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' && export AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' && export S3_BUCKET_NAME='$S3_BUCKET_NAME' && export FIREBASE_SERVICE_ACCOUNT='$FIREBASE_SERVICE_ACCOUNT' && bash -s" < deploy_script.sh
+        # Install sshpass and execute deployment via SSH
+        echo "🔐 Installing sshpass and connecting to production server..."
+        sudo apt-get update -qq && sudo apt-get install -y sshpass
+        
+        # Execute deployment via SSH with password authentication
+        sshpass -p "$SSH_PASSWORD" ssh -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "
+        cd /home/ec2-user/thakii-worker-service &&
+        git pull origin main &&
+        source venv/bin/activate &&
+        pip install -r requirements.txt &&
+        echo '${FIREBASE_SERVICE_ACCOUNT}' > firebase-service-account.json &&
+        chmod 600 firebase-service-account.json &&
+        sudo systemctl restart thakii-worker.service &&
+        sudo systemctl restart thakii-api.service &&
+        echo '✅ Worker services updated and restarted'
+        "
 
     - name: 🔍 Verify Deployment
+      env:
+        SSH_PASSWORD: ${{ secrets.thakii_ssh_password }}
       run: |
         echo "🔍 Verifying deployment..."
-        ssh -i ~/.ssh/thakii-02-developer-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="cloudflared access ssh --hostname %h" ec2-user@vps-71.fds-1.com "cd /home/ec2-user/thakii-worker-service && source venv/bin/activate && python3 -c 'print(\"Deployment verification complete!\")' && sudo systemctl status thakii-worker.service --no-pager && sudo systemctl status thakii-api.service --no-pager"
+        sshpass -p "$SSH_PASSWORD" ssh -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no ec2-user@vps-71.fds-1.com "cd /home/ec2-user/thakii-worker-service && source venv/bin/activate && python3 -c 'from core.firestore_integration import firestore_client; print(\"Firebase:\", firestore_client.is_available())' && sudo systemctl status thakii-worker.service --no-pager"
 
     - name: 📊 Deployment Summary
       if: always()
