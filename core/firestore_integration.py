@@ -85,8 +85,9 @@ class WorkerFirestoreClient:
         
         try:
             tasks_ref = self.db.collection(self.collection_name)
-            query = tasks_ref.where('status', '==', 'in_queue').limit(5)
-            docs = query.get()
+            # Consider both 'in_queue' and 'uploaded' as pending for better resilience
+            query = tasks_ref.where('status', 'in', ['in_queue', 'uploaded']).limit(5)
+            docs = query.stream()
             
             tasks = []
             for doc in docs:
@@ -94,6 +95,7 @@ class WorkerFirestoreClient:
                 task_data['id'] = doc.id
                 tasks.append(task_data)
             
+            print(f"🔍 Found {len(tasks)} pending tasks (in_queue or uploaded)")
             return tasks
         except Exception as e:
             print(f"❌ Failed to get pending tasks: {e}")

@@ -23,8 +23,12 @@ class EnhancedWorker:
         print(f"   Firestore: {'✅' if self.firestore.is_available() else '❌'}")
         print(f"   S3: {'✅' if self.s3.is_available() else '❌'}")
     
-    def process_video(self, video_id: str) -> bool:
+    def process_video(self, video_id: str, s3_key: str = None, filename: str = None) -> bool:
         print(f"\n🎯 Processing: {video_id}")
+        if s3_key:
+            print(f"   🔑 S3 Key: {s3_key}")
+        if filename:
+            print(f"   📁 Filename: {filename}")
         
         try:
             # Update to processing
@@ -36,15 +40,17 @@ class EnhancedWorker:
                 self.firestore.update_task_status(video_id, "failed", error="Task not found")
                 return False
             
-            filename = task.get('filename', f'{video_id}.mp4')
+            # Prefer parameters, then task fields, then fallback
+            filename = filename or task.get('filename', f'{video_id}.mp4')
+            s3_key = s3_key or task.get('s3_key') or task.get('s3_path')
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
                 video_path = temp_path / filename
                 pdf_path = temp_path / f"{video_id}.pdf"
                 
-                # Download video
-                if not self.s3.download_video(video_id, str(video_path)):
+                # Download video (use exact s3_key if available)
+                if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
                     self.firestore.update_task_status(video_id, "failed", error="Download failed")
                     return False
                 

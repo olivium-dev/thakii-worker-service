@@ -370,11 +370,13 @@ def process_video_from_s3():
         def background_s3_processing():
             try:
                 print(f"🎬 Starting REAL enhanced processing for video {video_id}")
+                print(f"   🔑 S3 Key: {s3_key}")
+                print(f"   📁 Filename: {filename}")
                 
                 # Use REAL enhanced worker logic instead of mock
                 from worker import EnhancedWorker
                 worker = EnhancedWorker()
-                success = worker.process_video(video_id)
+                success = worker.process_video(video_id, s3_key=s3_key, filename=filename)
                 
                 if success:
                     print(f"✅ REAL enhanced processing completed: {video_id}")

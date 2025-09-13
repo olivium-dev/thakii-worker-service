@@ -35,12 +35,20 @@ class WorkerS3Client:
     def is_available(self) -> bool:
         return self.s3_client is not None
     
-    def download_video(self, video_id: str, local_path: str) -> bool:
+    def download_video(self, video_id: str, local_path: str, s3_key: str = None) -> bool:
         if not self.is_available():
             return False
         
         try:
-            # First, try to find the actual file in the video_id folder
+            # If backend provided an exact S3 key, use it directly
+            if s3_key:
+                print(f"🎯 Using exact S3 key from backend: {s3_key}")
+                self.s3_client.download_file(self.bucket_name, s3_key, local_path)
+                print(f"✅ Video downloaded via exact key: {s3_key}")
+                return True
+
+            # Fallback: try to find the actual file in the video_id folder
+            print(f"⚠️ No exact S3 key provided, searching in videos/{video_id}/")
             try:
                 # List objects in the video folder to find the actual filename
                 response = self.s3_client.list_objects_v2(
@@ -50,9 +58,9 @@ class WorkerS3Client:
                 
                 if 'Contents' in response and len(response['Contents']) > 0:
                     # Use the first (and likely only) file in the folder
-                    s3_key = response['Contents'][0]['Key']
-                    self.s3_client.download_file(self.bucket_name, s3_key, local_path)
-                    print(f"✅ Video downloaded: {s3_key}")
+                    found_s3_key = response['Contents'][0]['Key']
+                    self.s3_client.download_file(self.bucket_name, found_s3_key, local_path)
+                    print(f"✅ Video downloaded via search: {found_s3_key}")
                     return True
                 else:
                     print(f"❌ No video files found in videos/{video_id}/")
