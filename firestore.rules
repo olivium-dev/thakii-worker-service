@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow all operations for now (managed by backend)
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
