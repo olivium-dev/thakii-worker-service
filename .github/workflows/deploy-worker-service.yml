@@ -92,7 +92,7 @@ on:
 
 jobs:
   deploy:
-    name: 🎯 Deploy to Production Server
+    name: 🎯 Deploy Worker Service with PDF Config
     runs-on: ubuntu-latest
     
     steps:
