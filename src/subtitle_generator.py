@@ -4,6 +4,9 @@ import torch
 import whisper
 import os
 import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class SubtitleGenerator:
     def __init__(self):
@@ -84,9 +87,9 @@ class SubtitleGenerator:
             initial_prompt="This is a lecture or educational content with clear speech.", # Context hint
             condition_on_previous_text=True,        # Use context from previous segments
             fp16=False,                             # Better precision
-            compression_ratio_threshold=2.4,        # Quality threshold
-            logprob_threshold=-1.0,                 # Confidence threshold
-            no_speech_threshold=0.6,                # Speech detection sensitivity
+            compression_ratio_threshold=float(os.getenv('WHISPER_COMPRESSION_THRESHOLD', 2.4)),
+            logprob_threshold=float(os.getenv('WHISPER_LOGPROB_THRESHOLD', -1.0)),
+            no_speech_threshold=float(os.getenv('WHISPER_NO_SPEECH_THRESHOLD', 0.6)),
             word_timestamps=True                    # CRUCIAL: Word-level timestamps for better segmentation
         )
         print("Done transcribing with enhanced parameters.")

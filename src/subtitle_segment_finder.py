@@ -3,6 +3,9 @@ from .subtitle_srt_parser import SubtitleSRTParser
 from .subtitle_part import SubtitlePart
 import cv2
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class SubtitleGenerator:
@@ -70,8 +73,13 @@ class SubtitleGenerator:
         ]
         
         # Calculate better segment timing with longer durations
-        num_segments = min(len(lecture_segments), 8)  # Increased from 7, but fewer overall
-        segment_duration = max(duration_ms // num_segments, 8000)  # Minimum 8 seconds per segment
+        max_subtitle_segments = int(os.getenv('MAX_SUBTITLE_SEGMENTS', 8))
+        min_subtitle_duration = int(os.getenv('MIN_SUBTITLE_DURATION', 8000))
+        
+        num_segments = min(len(lecture_segments), max_subtitle_segments)
+        segment_duration = max(duration_ms // num_segments, min_subtitle_duration)
+        
+        print(f"🎙️ Subtitle Config: max_segments={max_subtitle_segments}, min_duration={min_subtitle_duration}ms")
         
         print(f"🎤 Creating {num_segments} enhanced subtitle segments, {segment_duration}ms each")
         

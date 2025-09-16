@@ -1,5 +1,9 @@
 import numpy as np
 import cv2
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class PastFrameChangesTracker:
@@ -50,10 +54,13 @@ class VideoSegmentFinder:
         Is the min. number of pixel changes between two adjacent video frames for the two to be considered distinct
     """
 
-    def __init__(self, threshold=15, min_change=10000, min_segment_duration=2000):
-        self.threshold = threshold              # More sensitive threshold for better detection
-        self.min_change = min_change           # More sensitive change detection
-        self.min_segment_duration = min_segment_duration  # Minimum 2 seconds per segment
+    def __init__(self, threshold=None, min_change=None, min_segment_duration=None):
+        # Load from environment variables with fallback defaults
+        self.threshold = threshold or int(os.getenv('VIDEO_THRESHOLD', 15))
+        self.min_change = min_change or int(os.getenv('MIN_CHANGE', 10000))
+        self.min_segment_duration = min_segment_duration or int(os.getenv('MIN_SEGMENT_DURATION', 2000))
+        
+        print(f"🎛️ Video Analysis Config: threshold={self.threshold}, min_change={self.min_change}, min_segment_duration={self.min_segment_duration}ms")
 
     def get_best_segment_frames(self, video_file):
         ''' Finds a list of best possible video segments 
@@ -219,7 +226,7 @@ class VideoSegmentFinder:
             del selected_frames[updated_frame_nums[0]]
 
         # CRITICAL: Limit maximum number of segments to prevent fragmentation
-        max_segments = 10  # Maximum 10 segments for better text coherence
+        max_segments = int(os.getenv('MAX_SEGMENTS', 10))  # Configurable max segments
         if len(selected_frames) > max_segments:
             print(f"🔧 Reducing {len(selected_frames)} segments to {max_segments} for better text coherence")
             

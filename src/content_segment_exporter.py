@@ -2,6 +2,9 @@ import os
 import cv2
 from fpdf import FPDF
 import tempfile
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from .subtitle_webvtt_parser import SubtitleWebVTTParser
 from .subtitle_segment_finder import SubtitleSegmentFinder
@@ -41,15 +44,18 @@ class ContentSegmentPdfBuilder:
         with tempfile.TemporaryDirectory() as temp_dir_path:
             pdf = FPDF()
             
-            # Fix font path for production server
-            import os
-            font_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", "DejaVuSansCondensed.ttf")
+            # Configurable font settings
+            font_name = os.getenv('PDF_FONT_NAME', 'DejaVuSansCondensed')
+            font_size = int(os.getenv('PDF_FONT_SIZE', 12))
+            
+            font_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", f"{font_name}.ttf")
             if not os.path.exists(font_path):
                 print(f"⚠️ Font not found at {font_path}, using default font")
-                # Use default font if custom font not available
+                font_name = "Arial"  # Fallback to default
             else:
-                pdf.add_font("DejaVu", "", font_path, uni=True)
-                print(f"✅ Custom font loaded from {font_path}")
+                pdf.add_font("CustomFont", "", font_path, uni=True)
+                font_name = "CustomFont"
+                print(f"✅ Custom font loaded: {font_name} at {font_size}pt")
 
             for i in range(0, len(pages)):
                 # Temporarily save the frames
@@ -65,10 +71,11 @@ class ContentSegmentPdfBuilder:
                 if pages[i].text is not None and pages[i].text.strip():
                     print(f"📝 Adding text to page {i+1}: {pages[i].text[:50]}...")
                     try:
-                        pdf.set_font("DejaVu", "", 12)
+                        pdf.set_font(font_name, "", font_size)
                     except:
-                        # Fallback to default font if DejaVu fails
-                        pdf.set_font("Arial", "", 12)
+                        # Fallback to default font if custom font fails
+                        pdf.set_font("Arial", "", font_size)
+                        print(f"⚠️ Using fallback Arial font at {font_size}pt")
                     pdf.multi_cell(0, 10, pages[i].text)
                 else:
                     print(f"⚠️ No text for page {i+1}: {repr(pages[i].text)}")
