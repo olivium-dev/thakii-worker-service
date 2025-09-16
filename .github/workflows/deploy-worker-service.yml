@@ -16,83 +16,28 @@ on:
         - production
         - staging
       
-      # Video Analysis Configuration
+      # PDF Configuration
       video_threshold:
-        description: 'Video Threshold (pixel sensitivity, lower = more sensitive)'
+        description: 'Video Threshold (lower = more sensitive)'
         required: false
         default: '15'
         type: string
       
-      min_change:
-        description: 'Min Change (minimum pixel changes for frame detection)'
-        required: false
-        default: '10000'
-        type: string
-      
-      min_segment_duration:
-        description: 'Min Segment Duration (milliseconds, minimum segment length)'
-        required: false
-        default: '2000'
-        type: string
-      
       max_segments:
-        description: 'Max Segments (maximum slides per PDF)'
+        description: 'Max Segments (slides per PDF)'
         required: false
         default: '10'
         type: string
       
-      # Whisper AI Configuration
-      whisper_compression_threshold:
-        description: 'Whisper Compression Threshold (lower = higher quality)'
-        required: false
-        default: '2.4'
-        type: string
-      
-      whisper_logprob_threshold:
-        description: 'Whisper Log Probability Threshold (confidence level)'
-        required: false
-        default: '-1.0'
-        type: string
-      
-      whisper_no_speech_threshold:
-        description: 'Whisper No Speech Threshold (speech detection sensitivity)'
-        required: false
-        default: '0.6'
-        type: string
-      
-      # PDF Layout Configuration
       pdf_font_size:
-        description: 'PDF Font Size (points)'
+        description: 'PDF Font Size'
         required: false
         default: '12'
-        type: string
-      
-      pdf_font_name:
-        description: 'PDF Font Name'
-        required: false
-        default: 'DejaVuSansCondensed'
-        type: choice
-        options:
-        - DejaVuSansCondensed
-        - Arial
-        - Times
-      
-      # Subtitle Configuration
-      max_subtitle_segments:
-        description: 'Max Subtitle Segments (maximum subtitle sections)'
-        required: false
-        default: '8'
-        type: string
-      
-      min_subtitle_duration:
-        description: 'Min Subtitle Duration (milliseconds per subtitle)'
-        required: false
-        default: '8000'
         type: string
 
 jobs:
   deploy:
-    name: 🎯 Deploy Worker Service with PDF Config
+    name: 🎯 Deploy to Production Server
     runs-on: ubuntu-latest
     
     steps:
@@ -334,16 +279,16 @@ jobs:
         grep -E '^(AWS_|S3_)' /home/ec2-user/thakii-backend-api/.env >> .env &&
         echo "Adding PDF generation configuration..." &&
         echo "VIDEO_THRESHOLD=${{ github.event.inputs.video_threshold || '15' }}" >> .env &&
-        echo "MIN_CHANGE=${{ github.event.inputs.min_change || '10000' }}" >> .env &&
-        echo "MIN_SEGMENT_DURATION=${{ github.event.inputs.min_segment_duration || '2000' }}" >> .env &&
+        echo "MIN_CHANGE=10000" >> .env &&
+        echo "MIN_SEGMENT_DURATION=2000" >> .env &&
         echo "MAX_SEGMENTS=${{ github.event.inputs.max_segments || '10' }}" >> .env &&
-        echo "WHISPER_COMPRESSION_THRESHOLD=${{ github.event.inputs.whisper_compression_threshold || '2.4' }}" >> .env &&
-        echo "WHISPER_LOGPROB_THRESHOLD=${{ github.event.inputs.whisper_logprob_threshold || '-1.0' }}" >> .env &&
-        echo "WHISPER_NO_SPEECH_THRESHOLD=${{ github.event.inputs.whisper_no_speech_threshold || '0.6' }}" >> .env &&
+        echo "WHISPER_COMPRESSION_THRESHOLD=2.4" >> .env &&
+        echo "WHISPER_LOGPROB_THRESHOLD=-1.0" >> .env &&
+        echo "WHISPER_NO_SPEECH_THRESHOLD=0.6" >> .env &&
         echo "PDF_FONT_SIZE=${{ github.event.inputs.pdf_font_size || '12' }}" >> .env &&
-        echo "PDF_FONT_NAME=${{ github.event.inputs.pdf_font_name || 'DejaVuSansCondensed' }}" >> .env &&
-        echo "MAX_SUBTITLE_SEGMENTS=${{ github.event.inputs.max_subtitle_segments || '8' }}" >> .env &&
-        echo "MIN_SUBTITLE_DURATION=${{ github.event.inputs.min_subtitle_duration || '8000' }}" >> .env &&
+        echo "PDF_FONT_NAME=DejaVuSansCondensed" >> .env &&
+        echo "MAX_SUBTITLE_SEGMENTS=8" >> .env &&
+        echo "MIN_SUBTITLE_DURATION=8000" >> .env &&
         sudo systemctl restart thakii-worker.service &&
         sudo systemctl restart thakii-api.service &&
         echo '✅ Worker services updated and restarted'
