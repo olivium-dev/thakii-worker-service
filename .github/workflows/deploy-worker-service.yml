@@ -34,6 +34,19 @@ on:
         required: false
         default: '12'
         type: string
+      
+      # Subtitle Configuration
+      max_subtitle_segments:
+        description: 'Max Subtitle Segments (more = more dialog captured)'
+        required: false
+        default: '8'
+        type: string
+      
+      min_subtitle_duration:
+        description: 'Min Subtitle Duration (ms, lower = shorter segments)'
+        required: false
+        default: '8000'
+        type: string
 
 jobs:
   deploy:
@@ -287,8 +300,8 @@ jobs:
         echo "WHISPER_NO_SPEECH_THRESHOLD=0.6" >> .env &&
         echo "PDF_FONT_SIZE=${{ github.event.inputs.pdf_font_size || '12' }}" >> .env &&
         echo "PDF_FONT_NAME=DejaVuSansCondensed" >> .env &&
-        echo "MAX_SUBTITLE_SEGMENTS=8" >> .env &&
-        echo "MIN_SUBTITLE_DURATION=8000" >> .env &&
+         echo "MAX_SUBTITLE_SEGMENTS=${{ github.event.inputs.max_subtitle_segments || '8' }}" >> .env &&
+         echo "MIN_SUBTITLE_DURATION=${{ github.event.inputs.min_subtitle_duration || '8000' }}" >> .env &&
         sudo systemctl restart thakii-worker.service &&
         sudo systemctl restart thakii-api.service &&
         echo '✅ Worker services updated and restarted'
