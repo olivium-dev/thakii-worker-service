@@ -10,7 +10,7 @@ load_dotenv()
 class VideoSegmentFinder:
     """A class responsible for finding a list of best possible video segments using intelligent scene detection.
     
-    The minimum change threshold is calculated logarithmically based on video duration by default:
+    The minimum change threshold is calculated logarithmically based on video duration:
     min_change_percentage = 15 * log10(duration_seconds)
     
     This percentage determines how much of the frame must change to be considered a new scene.
@@ -21,23 +21,16 @@ class VideoSegmentFinder:
     - 100 seconds: 30% threshold  
     - 1000 seconds: 45% threshold
     - 10000 seconds: 60% threshold
-    
-    Backward Compatibility:
-    - Set min_change parameter or MIN_CHANGE env var to use fixed pixel threshold (legacy mode)
-    - Set max_segments parameter or MAX_SEGMENTS env var to limit output pages
     """
 
-    def __init__(self, threshold=None, min_change=None, min_segment_duration=None, max_segments=None):
+    def __init__(self, threshold=None, min_segment_duration=None, max_segments=None):
         """
-        Initialize VideoSegmentFinder with backward-compatible parameters.
+        Initialize VideoSegmentFinder with logarithmic threshold algorithm.
         
         Parameters
         ----------
         threshold : int, optional
             Pixel difference threshold for scene detection (default: 15)
-        min_change : int, optional
-            LEGACY: Fixed minimum pixel changes to detect scene.
-            If provided, overrides logarithmic calculation for backward compatibility.
         min_segment_duration : int, optional
             Minimum duration between segments in milliseconds (default: 2000)
         max_segments : int, optional
@@ -46,23 +39,16 @@ class VideoSegmentFinder:
         # Pixel difference threshold
         self.threshold = threshold or int(os.getenv('VIDEO_THRESHOLD', 15))
         
-        # BACKWARD COMPATIBLE: min_change can override logarithmic calculation
-        self.min_change_override = min_change
-        if self.min_change_override is None and os.getenv('MIN_CHANGE'):
-            self.min_change_override = int(os.getenv('MIN_CHANGE'))
-        
         # Minimum segment duration in milliseconds
         self.min_segment_duration = min_segment_duration or int(os.getenv('MIN_SEGMENT_DURATION', 2000))
         
-        # BACKWARD COMPATIBLE: max_segments for output limiting
+        # Maximum segments for output limiting (optional safety limit)
         self.max_segments = max_segments
         if self.max_segments is None and os.getenv('MAX_SEGMENTS'):
             self.max_segments = int(os.getenv('MAX_SEGMENTS'))
         
         # Log configuration
         config_parts = [f"pixel_threshold={self.threshold}"]
-        if self.min_change_override:
-            config_parts.append(f"min_change={self.min_change_override} (LEGACY MODE)")
         config_parts.append(f"min_segment_duration={self.min_segment_duration}ms")
         if self.max_segments:
             config_parts.append(f"max_segments={self.max_segments}")
@@ -128,25 +114,19 @@ class VideoSegmentFinder:
         duration_seconds = total_frames / fps if fps > 0 else 0
         total_pixels = frame_width * frame_height
         
-        # SMART THRESHOLD CALCULATION with backward compatibility
-        if self.min_change_override:
-            # LEGACY MODE: Use fixed pixel count from config
-            min_change_pixels = self.min_change_override
-            print(f"📊 Video Duration: {duration_seconds:.1f}s ({frame_width}x{frame_height}, {fps} fps)")
-            print(f"🔧 LEGACY MODE: Fixed threshold = {min_change_pixels:,} pixels")
+        # LOGARITHMIC THRESHOLD CALCULATION
+        # For 100 seconds: 30% of pixels must change
+        if duration_seconds < 1:
+            min_change_percentage = 15.0
         else:
-            # NEW MODE: Logarithmic threshold calculation (recommended)
-            if duration_seconds < 1:
-                min_change_percentage = 15.0
-            else:
-                min_change_percentage = 15 * math.log10(duration_seconds)
-                min_change_percentage = max(5.0, min(min_change_percentage, 50.0))  # Clamp between 5-50%
-            
-            min_change_pixels = int(total_pixels * (min_change_percentage / 100.0))
-            
-            print(f"📊 Video Duration: {duration_seconds:.1f}s ({frame_width}x{frame_height}, {fps} fps)")
-            print(f"🎯 Logarithmic threshold: {min_change_percentage:.1f}% of pixels = {min_change_pixels:,} pixels")
-            print(f"   Formula: 15 * log10({duration_seconds:.1f}) = {min_change_percentage:.1f}%")
+            min_change_percentage = 15 * math.log10(duration_seconds)
+            min_change_percentage = max(5.0, min(min_change_percentage, 50.0))  # Clamp between 5-50%
+        
+        min_change_pixels = int(total_pixels * (min_change_percentage / 100.0))
+        
+        print(f"📊 Video Duration: {duration_seconds:.1f}s ({frame_width}x{frame_height}, {fps} fps)")
+        print(f"🎯 Logarithmic threshold: {min_change_percentage:.1f}% of pixels = {min_change_pixels:,} pixels")
+        print(f"   Formula: 15 * log10({duration_seconds:.1f}) = {min_change_percentage:.1f}%")
         
         # DYNAMIC FRAME SAMPLING: Adjust based on video length
         if duration_seconds < 60:
