@@ -10,7 +10,7 @@ load_dotenv()
 class VideoSegmentFinder:
     """A class responsible for finding a list of best possible video segments using intelligent scene detection.
     
-    The minimum change threshold is calculated logarithmically based on video duration:
+    The minimum change threshold is calculated logarithmically based on video duration by default:
     min_change_percentage = 15 * log10(duration_seconds)
     
     This percentage determines how much of the frame must change to be considered a new scene.
@@ -21,15 +21,53 @@ class VideoSegmentFinder:
     - 100 seconds: 30% threshold  
     - 1000 seconds: 45% threshold
     - 10000 seconds: 60% threshold
+    
+    Backward Compatibility:
+    - Set min_change parameter or MIN_CHANGE env var to use fixed pixel threshold (legacy mode)
+    - Set max_segments parameter or MAX_SEGMENTS env var to limit output pages
     """
 
-    def __init__(self, threshold=None, min_segment_duration=None):
+    def __init__(self, threshold=None, min_change=None, min_segment_duration=None, max_segments=None):
+        """
+        Initialize VideoSegmentFinder with backward-compatible parameters.
+        
+        Parameters
+        ----------
+        threshold : int, optional
+            Pixel difference threshold for scene detection (default: 15)
+        min_change : int, optional
+            LEGACY: Fixed minimum pixel changes to detect scene.
+            If provided, overrides logarithmic calculation for backward compatibility.
+        min_segment_duration : int, optional
+            Minimum duration between segments in milliseconds (default: 2000)
+        max_segments : int, optional
+            Maximum number of segments to return (default: None = unlimited)
+        """
         # Pixel difference threshold
         self.threshold = threshold or int(os.getenv('VIDEO_THRESHOLD', 15))
+        
+        # BACKWARD COMPATIBLE: min_change can override logarithmic calculation
+        self.min_change_override = min_change
+        if self.min_change_override is None and os.getenv('MIN_CHANGE'):
+            self.min_change_override = int(os.getenv('MIN_CHANGE'))
+        
         # Minimum segment duration in milliseconds
         self.min_segment_duration = min_segment_duration or int(os.getenv('MIN_SEGMENT_DURATION', 2000))
         
-        print(f"🎛️ Video Analysis Config: pixel_threshold={self.threshold}, min_segment_duration={self.min_segment_duration}ms")
+        # BACKWARD COMPATIBLE: max_segments for output limiting
+        self.max_segments = max_segments
+        if self.max_segments is None and os.getenv('MAX_SEGMENTS'):
+            self.max_segments = int(os.getenv('MAX_SEGMENTS'))
+        
+        # Log configuration
+        config_parts = [f"pixel_threshold={self.threshold}"]
+        if self.min_change_override:
+            config_parts.append(f"min_change={self.min_change_override} (LEGACY MODE)")
+        config_parts.append(f"min_segment_duration={self.min_segment_duration}ms")
+        if self.max_segments:
+            config_parts.append(f"max_segments={self.max_segments}")
+        
+        print(f"🎛️ Video Analysis Config: {', '.join(config_parts)}")
 
     def get_best_segment_frames(self, video_file):
         ''' Finds a list of best possible video segments 
@@ -90,19 +128,25 @@ class VideoSegmentFinder:
         duration_seconds = total_frames / fps if fps > 0 else 0
         total_pixels = frame_width * frame_height
         
-        # LOGARITHMIC THRESHOLD CALCULATION
-        # For 100 seconds: 30% of pixels must change
-        if duration_seconds < 1:
-            min_change_percentage = 15.0
+        # SMART THRESHOLD CALCULATION with backward compatibility
+        if self.min_change_override:
+            # LEGACY MODE: Use fixed pixel count from config
+            min_change_pixels = self.min_change_override
+            print(f"📊 Video Duration: {duration_seconds:.1f}s ({frame_width}x{frame_height}, {fps} fps)")
+            print(f"🔧 LEGACY MODE: Fixed threshold = {min_change_pixels:,} pixels")
         else:
-            min_change_percentage = 15 * math.log10(duration_seconds)
-            min_change_percentage = max(5.0, min(min_change_percentage, 50.0))  # Clamp between 5-50%
-        
-        min_change_pixels = int(total_pixels * (min_change_percentage / 100.0))
-        
-        print(f"📊 Video Duration: {duration_seconds:.1f}s ({frame_width}x{frame_height}, {fps} fps)")
-        print(f"🎯 Logarithmic threshold: {min_change_percentage:.1f}% of pixels = {min_change_pixels:,} pixels")
-        print(f"   Formula: 15 * log10({duration_seconds:.1f}) = {min_change_percentage:.1f}%")
+            # NEW MODE: Logarithmic threshold calculation (recommended)
+            if duration_seconds < 1:
+                min_change_percentage = 15.0
+            else:
+                min_change_percentage = 15 * math.log10(duration_seconds)
+                min_change_percentage = max(5.0, min(min_change_percentage, 50.0))  # Clamp between 5-50%
+            
+            min_change_pixels = int(total_pixels * (min_change_percentage / 100.0))
+            
+            print(f"📊 Video Duration: {duration_seconds:.1f}s ({frame_width}x{frame_height}, {fps} fps)")
+            print(f"🎯 Logarithmic threshold: {min_change_percentage:.1f}% of pixels = {min_change_pixels:,} pixels")
+            print(f"   Formula: 15 * log10({duration_seconds:.1f}) = {min_change_percentage:.1f}%")
         
         # DYNAMIC FRAME SAMPLING: Adjust based on video length
         if duration_seconds < 60:
@@ -214,6 +258,65 @@ class VideoSegmentFinder:
         updated_frame_nums = sorted(selected_frames.keys())
         if updated_frame_nums and updated_frame_nums[0] in selected_frames:
             del selected_frames[updated_frame_nums[0]]
+
+        print(f"🔍 Scenes after filtering: {len(selected_frames)} screenshots")
+
+        # BACKWARD COMPATIBLE: Limit maximum number of segments
+        if self.max_segments and len(selected_frames) > self.max_segments:
+            print(f"🔧 Reducing {len(selected_frames)} segments to {self.max_segments} (MAX_SEGMENTS limit)")
+            
+            # Keep evenly distributed segments
+            frame_nums = sorted(selected_frames.keys())
+            keep_every = max(1, len(frame_nums) // self.max_segments)
+            
+            new_selected_frames = {}
+            kept_count = 0
+            for i in range(0, len(frame_nums), keep_every):
+                if kept_count >= self.max_segments:
+                    break
+                frame_num = frame_nums[i]
+                new_selected_frames[frame_num] = selected_frames[frame_num]
+                kept_count += 1
+            
+            # Always keep the last frame if not already included
+            if frame_nums and frame_nums[-1] not in new_selected_frames:
+                new_selected_frames[frame_nums[-1]] = selected_frames[frame_nums[-1]]
+            
+            selected_frames = new_selected_frames
+            print(f"✅ Reduced to {len(selected_frames)} segments")
+
+        # BACKWARD COMPATIBLE: Ensure minimum segments for reliability
+        MIN_SEGMENTS_GUARANTEE = 2
+        if len(selected_frames) < MIN_SEGMENTS_GUARANTEE:
+            print(f"⚠️ Only {len(selected_frames)} segments detected, creating minimum segments...")
+            
+            # Create at least 2 segments from the video
+            video_reader.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret1, frame1 = video_reader.read()
+            timestamp1 = 0
+            
+            video_reader.set(cv2.CAP_PROP_POS_FRAMES, total_frames // 2)
+            ret2, frame2 = video_reader.read()
+            timestamp2 = video_reader.get(cv2.CAP_PROP_POS_MSEC)
+            
+            if ret1 and ret2:
+                selected_frames = {
+                    0: {
+                        "timestamp": timestamp1,
+                        "frame": frame1,
+                        "next_frame": frame2,
+                        "mask": frame1,
+                        "num_pixels_changed": 0
+                    },
+                    total_frames // 2: {
+                        "timestamp": timestamp2,
+                        "frame": frame2,
+                        "next_frame": 255 * np.ones((frame_height, frame_width, 3), np.uint8),
+                        "mask": frame2,
+                        "num_pixels_changed": 0
+                    }
+                }
+                print(f"✅ Minimum segments created: {len(selected_frames)}")
 
         print(f"✅ Final scenes after filtering: {len(selected_frames)} screenshots")
         print(f"📄 Expected PDF pages: {len(selected_frames)}")
