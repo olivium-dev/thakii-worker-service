@@ -54,18 +54,21 @@ class CommandLineArgRunner:
             )
         else:
             if subtitle_filepath is None:
-                print("🎤 Generating REAL subtitles from actual video audio...")
-                # Generate real subtitles using Whisper transcription
+                print("🎤 REAL TRANSCRIPTION REQUIRED - Using Whisper AI")
+                print("=" * 70)
+                
+                # NO FALLBACKS - Whisper is mandatory for real transcription
                 try:
                     import whisper
                     import os
                     
                     # Load Whisper model
-                    print("📥 Loading Whisper model...")
-                    model = whisper.load_model("base")  # Start with base for speed
+                    print("📥 Loading Whisper model (base)...")
+                    model = whisper.load_model("base")
                     
-                    # Transcribe the video
+                    # Transcribe the video - captures EVERY WORD
                     print("🎵 Transcribing audio from video...")
+                    print("⏳ This will capture every single spoken word...")
                     result = model.transcribe(video_filepath, language="en", word_timestamps=True)
                     
                     # Save to SRT file
@@ -86,17 +89,39 @@ class CommandLineArgRunner:
                             
                             f.write(f"{i+1}\n{format_time(start_time)} --> {format_time(end_time)}\n{text}\n\n")
                     
-                    print(f"✅ Real transcription saved to: {srt_path}")
+                    total_words = sum(len(seg['text'].split()) for seg in result['segments'])
+                    print(f"✅ Real transcription complete!")
+                    print(f"   📝 Segments: {len(result['segments'])}")
+                    print(f"   💬 Words captured: {total_words}")
+                    print(f"   💾 Saved to: {srt_path}")
+                    print("=" * 70)
                     subtitle_parser = SubtitleSRTParser(srt_path)
                     
                 except ImportError as e:
-                    print(f"⚠️ Whisper/PyTorch not available: {e}")
-                    print("🔄 Using enhanced subtitle generator with improved segmentation...")
-                    subtitle_parser = SubtitleGenerator(video_filepath)
+                    print("\n" + "=" * 70)
+                    print("❌ FATAL ERROR: Whisper AI is NOT installed")
+                    print("=" * 70)
+                    print(f"Error: {e}")
+                    print("\nThis system requires REAL transcription with Whisper AI.")
+                    print("NO FALLBACKS, NO FAKE TEXT, NO MOCKS allowed.\n")
+                    print("To fix this, install Whisper:")
+                    print("  pip install openai-whisper torch")
+                    print("  brew install ffmpeg  # Required for audio extraction")
+                    print("=" * 70)
+                    raise SystemExit("Whisper AI required for real transcription")
+                    
                 except Exception as e:
-                    print(f"⚠️ Whisper transcription failed: {e}")
-                    print("🔄 Falling back to enhanced subtitle generator...")
-                    subtitle_parser = SubtitleGenerator(video_filepath)
+                    print("\n" + "=" * 70)
+                    print("❌ FATAL ERROR: Whisper transcription failed")
+                    print("=" * 70)
+                    print(f"Error: {e}")
+                    print("\nCannot proceed without real transcription.")
+                    print("Please check:")
+                    print("  1. Video file is valid and contains audio")
+                    print("  2. ffmpeg is installed (brew install ffmpeg)")
+                    print("  3. Sufficient disk space and memory")
+                    print("=" * 70)
+                    raise
             elif subtitle_filepath.endswith(".srt"):
                 subtitle_parser = SubtitleSRTParser(subtitle_filepath)
             else:
