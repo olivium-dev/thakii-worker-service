@@ -23,7 +23,7 @@ class VideoSegmentFinder:
     - 10000 seconds: 60% threshold
     """
 
-    def __init__(self, threshold=None, min_segment_duration=None, max_segments=None):
+    def __init__(self, threshold=None, min_change=None, min_segment_duration=None, max_segments=None):
         """
         Initialize VideoSegmentFinder with logarithmic threshold algorithm.
         
@@ -31,6 +31,9 @@ class VideoSegmentFinder:
         ----------
         threshold : int, optional
             Pixel difference threshold for scene detection (default: 15)
+        min_change : int, optional
+            DEPRECATED: This parameter is ignored. Kept for backward compatibility.
+            The algorithm now uses logarithmic threshold automatically.
         min_segment_duration : int, optional
             Minimum duration between segments in milliseconds (default: 2000)
         max_segments : int, optional
@@ -38,6 +41,11 @@ class VideoSegmentFinder:
         """
         # Pixel difference threshold
         self.threshold = threshold or int(os.getenv('VIDEO_THRESHOLD', 15))
+        
+        # DEPRECATED: min_change parameter kept for backward compatibility but not used
+        # Algorithm always uses logarithmic threshold
+        if min_change is not None or os.getenv('MIN_CHANGE'):
+            print("⚠️  Warning: MIN_CHANGE is deprecated and ignored. Using logarithmic threshold.")
         
         # Minimum segment duration in milliseconds
         self.min_segment_duration = min_segment_duration or int(os.getenv('MIN_SEGMENT_DURATION', 2000))
