@@ -30,7 +30,7 @@ except ImportError as e:
 app = Flask(__name__)
 
 # Import Firebase integration (REQUIRED)
-from core.firestore_integration import firestore_client
+from core.postgres_integration import postgres_client
 print("✅ Firebase integration loaded - Local storage disabled")
 
 # Local task storage for API server (fallback when Firebase unavailable)
@@ -65,7 +65,7 @@ def real_video_processing(video_id, video_path):
         print(f"🎬 Starting REAL processing for video {video_id}")
         # Update status in Firebase
         try:
-            firestore_client.update_task_status(video_id, "processing")
+            postgres_client.update_task_status(video_id, "processing")
             print(f"✅ Updated Firebase status to processing: {video_id}")
         except Exception as e:
             print(f"⚠️ Failed to update Firebase status: {e}")
@@ -103,7 +103,7 @@ def real_video_processing(video_id, video_path):
         # Update status to completed
         # Update status in Firebase
         try:
-            firestore_client.update_task_status(video_id, "completed", pdf_url=f"local://{pdf_path}")
+            postgres_client.update_task_status(video_id, "completed", pdf_url=f"local://{pdf_path}")
             print(f"✅ Updated Firebase status to completed: {video_id}")
         except Exception as e:
             print(f"⚠️ Failed to update Firebase status: {e}")
@@ -114,7 +114,7 @@ def real_video_processing(video_id, video_path):
         print(f"❌ REAL processing failed for video {video_id}: {str(e)}")
         # Update status in Firebase
         try:
-            firestore_client.update_task_status(video_id, "failed", error=str(e))
+            postgres_client.update_task_status(video_id, "failed", error=str(e))
             print(f"✅ Updated Firebase status to failed: {video_id}")
         except Exception as e2:
             print(f"⚠️ Failed to update Firebase status: {e2}")
@@ -183,9 +183,9 @@ def upload_video():
         
         # Store in Firebase if available
         try:
-            from core.firestore_integration import firestore_client
-            if firestore_client.is_available():
-                firestore_client.update_task_status(
+            from core.postgres_integration import postgres_client
+            if postgres_client.is_available():
+                postgres_client.update_task_status(
                     video_id, "uploaded",
                     filename=filename,
                     size=size,
@@ -216,14 +216,14 @@ def list_videos():
         videos = []
         
         # Get all videos from Firebase
-        all_tasks = firestore_client.get_all_tasks() if hasattr(firestore_client, 'get_all_tasks') else []
-        pending_tasks = firestore_client.get_pending_tasks() or []
+        all_tasks = postgres_client.get_all_tasks() if hasattr(postgres_client, 'get_all_tasks') else []
+        pending_tasks = postgres_client.get_pending_tasks() or []
         
         # If get_all_tasks is not available, try to get tasks by status
-        if not all_tasks and hasattr(firestore_client, 'db') and firestore_client.db:
+        if not all_tasks and hasattr(postgres_client, 'db') and postgres_client.db:
             try:
                 # Get all documents from video_tasks collection
-                docs = firestore_client.db.collection('video_tasks').stream()
+                docs = postgres_client.db.collection('video_tasks').stream()
                 all_tasks = []
                 for doc in docs:
                     task_data = doc.to_dict()
@@ -399,7 +399,7 @@ def process_video_from_s3():
         
         # Update task status to processing
         try:
-            firestore_client.update_task_status(video_id, "processing")
+            postgres_client.update_task_status(video_id, "processing")
             print(f"✅ Task status updated to processing: {video_id}")
         except Exception as e:
             print(f"⚠️ Failed to update task status: {e}")
@@ -423,7 +423,7 @@ def process_video_from_s3():
                     
             except Exception as e:
                 print(f"❌ Real processing failed: {e}")
-                firestore_client.update_task_status(video_id, "failed", error=str(e))
+                postgres_client.update_task_status(video_id, "failed", error=str(e))
         
         import threading
         thread = threading.Thread(target=background_s3_processing)
@@ -475,7 +475,7 @@ def generate_pdf_direct():
         
         # Save task to Firebase
         try:
-            firestore_client.create_task(video_id, task)
+            postgres_client.create_task(video_id, task)
             print(f"✅ Task created in Firebase: {video_id}")
         except Exception as e:
             print(f"⚠️ Failed to create task in Firebase: {e}")
@@ -567,7 +567,7 @@ def get_video_status(video_id):
     """Get REAL video processing status from Firebase - no authentication required"""
     try:
         # Get task from Firebase
-        task = firestore_client.get_task_details(video_id)
+        task = postgres_client.get_task_details(video_id)
         if not task:
             return jsonify({"error": f"Video {video_id} not found"}), 404
         

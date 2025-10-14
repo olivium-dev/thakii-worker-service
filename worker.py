@@ -12,15 +12,15 @@ import subprocess
 from pathlib import Path
 
 # Import Firebase integration
-from core.firestore_integration import firestore_client
+from core.postgres_integration import postgres_client
 from core.s3_integration import s3_client
 
 class EnhancedWorker:
     def __init__(self):
-        self.firestore = firestore_client
+        self.postgres = postgres_client
         self.s3 = s3_client
-        print("🚀 Enhanced Worker with Firebase Integration")
-        print(f"   Firestore: {'✅' if self.firestore.is_available() else '❌'}")
+        print("🚀 Enhanced Worker with PostgreSQL Integration")
+        print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}")
         print(f"   S3: {'✅' if self.s3.is_available() else '❌'}")
     
     def process_video(self, video_id: str, s3_key: str = None, filename: str = None) -> bool:
@@ -32,12 +32,12 @@ class EnhancedWorker:
         
         try:
             # Update to processing
-            self.firestore.update_task_status(video_id, "processing")
+            self.postgres.update_task_status(video_id, "processing")
             
             # Get task details
-            task = self.firestore.get_task_details(video_id)
+            task = self.postgres.get_task_details(video_id)
             if not task:
-                self.firestore.update_task_status(video_id, "failed", error="Task not found")
+                self.postgres.update_task_status(video_id, "failed", error="Task not found")
                 return False
             
             # Prefer parameters, then task fields, then fallback
@@ -51,27 +51,27 @@ class EnhancedWorker:
                 
                 # Download video (use exact s3_key if available)
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
-                    self.firestore.update_task_status(video_id, "failed", error="Download failed")
+                    self.postgres.update_task_status(video_id, "failed", error="Download failed")
                     return False
                 
                 # Generate PDF with superior algorithms
                 if not self._generate_superior_pdf(video_path, pdf_path):
-                    self.firestore.update_task_status(video_id, "failed", error="PDF generation failed")
+                    self.postgres.update_task_status(video_id, "failed", error="PDF generation failed")
                     return False
                 
                 # Upload PDF
                 pdf_url = self.s3.upload_pdf(str(pdf_path), video_id)
                 if not pdf_url:
-                    self.firestore.update_task_status(video_id, "failed", error="Upload failed")
+                    self.postgres.update_task_status(video_id, "failed", error="Upload failed")
                     return False
                 
                 # Mark completed
-                self.firestore.update_task_status(video_id, "completed", pdf_url=pdf_url)
+                self.postgres.update_task_status(video_id, "completed", pdf_url=pdf_url)
                 print(f"🎉 Success: {video_id}")
                 return True
                 
         except Exception as e:
-            self.firestore.update_task_status(video_id, "failed", error=str(e))
+            self.postgres.update_task_status(video_id, "failed", error=str(e))
             return False
     
     def _generate_superior_pdf(self, video_path: Path, pdf_path: Path) -> bool:
@@ -100,7 +100,7 @@ class EnhancedWorker:
         
         while True:
             try:
-                pending_tasks = self.firestore.get_pending_tasks()
+                pending_tasks = self.postgres.get_pending_tasks()
                 
                 if pending_tasks:
                     for task in pending_tasks:
