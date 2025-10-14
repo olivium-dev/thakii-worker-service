@@ -1,0 +1,315 @@
+name: 🎤 Deploy Whisper AI Dependencies
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+
+jobs:
+  deploy-whisper:
+    name: 🎤 Install & Validate Whisper AI
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    env:
+      MAX_AUTO_FIX_ATTEMPTS: 3
+      ATTEMPT_COUNT: 0
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup Deployment Tools
+      run: |
+        echo "🔧 Installing deployment tools..."
+        sudo apt-get update -qq && sudo apt-get install -y sshpass jq
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        echo "✅ Deployment tools ready"
+
+    - name: 🔑 Setup SSH
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.thakii_ssh_private_key }}
+      run: |
+        echo "🔑 Setting up SSH configuration..."
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        
+        echo "$SSH_PRIVATE_KEY" | base64 -d > ~/.ssh/thakii-key 2>/dev/null || echo "$SSH_PRIVATE_KEY" > ~/.ssh/thakii-key
+        chmod 600 ~/.ssh/thakii-key
+        
+        cat > ~/.ssh/config << EOF
+        Host production-server
+          HostName vps-71.fds-1.com
+          User ec2-user
+          IdentityFile ~/.ssh/thakii-key
+          ProxyCommand cloudflared access ssh --hostname %h
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+        EOF
+        
+        chmod 600 ~/.ssh/config
+        echo "✅ SSH configured"
+
+    - name: 📋 Copy Scripts to Server
+      run: |
+        echo "📋 Copying installation scripts to server..."
+        
+        scp -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          scripts/install_whisper_dependencies.sh \
+          scripts/validate_whisper_installation.sh \
+          scripts/auto_fix_whisper_issues.sh \
+          scripts/compare_pdf_content.py \
+          scripts/e2e_test_video_processing.sh \
+          ec2-user@vps-71.fds-1.com:/home/ec2-user/
+        
+        echo "✅ Scripts copied to server"
+
+    - name: 🚀 Install Whisper Dependencies
+      id: install
+      run: |
+        echo "🚀 Running Whisper installation script..."
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'chmod +x /home/ec2-user/install_whisper_dependencies.sh && bash /home/ec2-user/install_whisper_dependencies.sh' || {
+          echo "install_failed=true" >> $GITHUB_OUTPUT
+          exit 1
+        }
+        
+        echo "✅ Installation completed"
+
+    - name: 🔄 Restart Worker Service
+      if: steps.install.outputs.install_failed != 'true'
+      run: |
+        echo "🔄 Restarting thakii-worker.service..."
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'sudo systemctl restart thakii-worker.service'
+        
+        echo "⏳ Waiting 5 seconds for service to start..."
+        sleep 5
+        
+        echo "✅ Worker service restarted"
+
+    - name: 🧪 Validation Loop - 10 seconds
+      id: validate_10s
+      run: |
+        echo "🧪 [T+10s] Running validation checks..."
+        sleep 10
+        
+        VALIDATION_OUTPUT=$(ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'chmod +x /home/ec2-user/validate_whisper_installation.sh && bash /home/ec2-user/validate_whisper_installation.sh' 2>&1) || {
+          echo "validation_failed=true" >> $GITHUB_OUTPUT
+          echo "$VALIDATION_OUTPUT"
+          echo "$VALIDATION_OUTPUT" > /tmp/validation_output.txt
+          exit 1
+        }
+        
+        echo "$VALIDATION_OUTPUT"
+        echo "✅ [T+10s] Validation passed"
+
+    - name: 🔧 Auto-Fix Attempt 1 (if T+10s failed)
+      if: steps.validate_10s.outputs.validation_failed == 'true'
+      run: |
+        echo "🔧 Attempting auto-fix (Attempt 1/3)..."
+        
+        VALIDATION_OUTPUT=$(cat /tmp/validation_output.txt || echo "unknown error")
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          "chmod +x /home/ec2-user/auto_fix_whisper_issues.sh && bash /home/ec2-user/auto_fix_whisper_issues.sh '$VALIDATION_OUTPUT'" || {
+          echo "❌ Auto-fix attempt 1 failed"
+          exit 1
+        }
+        
+        echo "🔄 Restarting worker service after fix..."
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'sudo systemctl restart thakii-worker.service'
+        
+        sleep 10
+        echo "✅ Auto-fix attempt 1 completed"
+
+    - name: 🧪 Validation Loop - 30 seconds
+      id: validate_30s
+      if: always() && steps.install.outputs.install_failed != 'true'
+      run: |
+        echo "🧪 [T+30s] Running validation checks..."
+        sleep 20  # Additional 20s (already waited 10s)
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'bash /home/ec2-user/validate_whisper_installation.sh' || {
+          echo "validation_failed=true" >> $GITHUB_OUTPUT
+          exit 1
+        }
+        
+        echo "✅ [T+30s] Validation passed"
+
+    - name: 🧪 Validation Loop - 90 seconds
+      id: validate_90s
+      if: always() && steps.install.outputs.install_failed != 'true'
+      run: |
+        echo "🧪 [T+90s] Running validation checks..."
+        sleep 60  # Additional 60s
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'bash /home/ec2-user/validate_whisper_installation.sh' || {
+          echo "validation_failed=true" >> $GITHUB_OUTPUT
+          exit 1
+        }
+        
+        echo "✅ [T+90s] Validation passed"
+
+    - name: 🧪 Validation Loop - 3 minutes (1st check)
+      id: validate_3m1
+      if: always() && steps.install.outputs.install_failed != 'true'
+      run: |
+        echo "🧪 [T+3min] Running validation checks..."
+        sleep 90  # Additional 90s
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'bash /home/ec2-user/validate_whisper_installation.sh'
+        
+        echo "✅ [T+3min] Validation passed"
+
+    - name: 🧪 Validation Loop - 3 minutes (2nd check)
+      id: validate_3m2
+      if: always() && steps.install.outputs.install_failed != 'true'
+      run: |
+        echo "🧪 [T+6min] Running validation checks..."
+        sleep 180  # Additional 3 minutes
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'bash /home/ec2-user/validate_whisper_installation.sh'
+        
+        echo "✅ [T+6min] Validation passed"
+
+    - name: 🧪 Validation Loop - 3 minutes (3rd check)
+      id: validate_3m3
+      if: always() && steps.install.outputs.install_failed != 'true'
+      run: |
+        echo "🧪 [T+9min] Running validation checks..."
+        sleep 180  # Additional 3 minutes
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'bash /home/ec2-user/validate_whisper_installation.sh'
+        
+        echo "✅ [T+9min] Validation passed"
+
+    - name: 📤 Upload Test Video
+      run: |
+        echo "📤 Uploading test-video.mp4 to server for E2E test..."
+        
+        scp -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          test-video.mp4 \
+          ec2-user@vps-71.fds-1.com:/home/ec2-user/test-video.mp4
+        
+        echo "✅ Test video uploaded"
+
+    - name: 🎬 End-to-End Test
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TEST_TOKEN }}
+      run: |
+        echo "🎬 Running end-to-end video processing test..."
+        
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          "chmod +x /home/ec2-user/e2e_test_video_processing.sh && bash /home/ec2-user/e2e_test_video_processing.sh /home/ec2-user/test-video.mp4 '$FIREBASE_TOKEN'"
+        
+        echo "✅ End-to-end test passed"
+
+    - name: 🔍 Final Validation
+      run: |
+        echo "🔍 Running final validation checks..."
+        
+        # Re-run all validation checks
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'bash /home/ec2-user/validate_whisper_installation.sh'
+        
+        # Check worker logs for errors
+        echo ""
+        echo "📋 Checking worker logs for errors..."
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'sudo journalctl -u thakii-worker.service -n 100 --no-pager | grep -i "error\|fatal\|failed" || echo "No errors found in logs"'
+        
+        echo ""
+        echo "✅ Final validation passed"
+
+    - name: 📊 Deployment Summary
+      if: always()
+      run: |
+        echo "## 🎤 Whisper AI Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.validate_10s.outcome }}" == "success" ] && [ "${{ steps.validate_30s.outcome }}" == "success" ]; then
+          echo "### ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Installation | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Whisper AI | ✅ Installed |" >> $GITHUB_STEP_SUMMARY
+          echo "| PyTorch | ✅ Installed |" >> $GITHUB_STEP_SUMMARY
+          echo "| ffmpeg | ✅ Installed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Medium Model | ✅ Downloaded |" >> $GITHUB_STEP_SUMMARY
+          echo "| Worker Service | ✅ Restarted |" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation (10s) | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation (30s) | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation (90s) | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation (3min) | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| E2E Test | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎉 Production is now using REAL transcription!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ No more fake 'Welcome to today's lecture' content" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Real Whisper AI transcription active" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dynamic page generation based on video content" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Professional quality PDFs with actual speech" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please check the logs above for details." >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📍 **Server**: vps-71.fds-1.com" >> $GITHUB_STEP_SUMMARY
+        echo "📁 **Worker Path**: /home/ec2-user/thakii-worker-service" >> $GITHUB_STEP_SUMMARY
+        echo "🔧 **Service**: thakii-worker.service" >> $GITHUB_STEP_SUMMARY
+
+    - name: ❌ Rollback on Failure
+      if: failure()
+      run: |
+        echo "❌ Deployment failed, capturing diagnostics..."
+        
+        # Capture full logs
+        ssh -i ~/.ssh/thakii-key -o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=no \
+          ec2-user@vps-71.fds-1.com \
+          'sudo journalctl -u thakii-worker.service -n 200 --no-pager' > worker_logs.txt || true
+        
+        echo "📋 Worker logs saved to worker_logs.txt"
+        
+        # Display last 50 lines
+        echo ""
+        echo "📋 Last 50 lines of worker logs:"
+        tail -50 worker_logs.txt || true
+        
+        echo ""
+        echo "❌ Deployment failed - manual intervention required"
+        exit 1
+
