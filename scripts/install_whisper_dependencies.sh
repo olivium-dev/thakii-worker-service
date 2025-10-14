@@ -117,9 +117,11 @@ install_python_dependencies() {
     echo "   This will download ~2GB of packages including PyTorch..."
     
     # Install in specific order to avoid conflicts
-    pip install "numpy<2" --quiet
-    pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --quiet
-    pip install openai-whisper==20231117 --quiet
+    # Use --no-cache-dir to prevent disk space issues
+    # Install CPU-only torch to save disk space (~1GB vs ~3GB)
+    pip install "numpy<2" --no-cache-dir
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
+    pip install openai-whisper --no-cache-dir
     
     echo "✅ Python dependencies installed"
 }
