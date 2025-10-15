@@ -37,7 +37,7 @@ class EnhancedWorker:
             # Get task details
             task = self.postgres.get_task_details(video_id)
             if not task:
-                self.postgres.update_task_status(video_id, "failed", error="Task not found")
+                self.postgres.update_task_status(video_id, "failed", error_message="Task not found")
                 return False
             
             # Prefer parameters, then task fields, then fallback
@@ -51,27 +51,27 @@ class EnhancedWorker:
                 
                 # Download video (use exact s3_key if available)
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
-                    self.postgres.update_task_status(video_id, "failed", error="Download failed")
+                    self.postgres.update_task_status(video_id, "failed", error_message="Download failed")
                     return False
                 
                 # Generate PDF with superior algorithms
                 if not self._generate_superior_pdf(video_path, pdf_path):
-                    self.postgres.update_task_status(video_id, "failed", error="PDF generation failed")
+                    self.postgres.update_task_status(video_id, "failed", error_message="PDF generation failed")
                     return False
                 
                 # Upload PDF
                 pdf_url = self.s3.upload_pdf(str(pdf_path), video_id)
                 if not pdf_url:
-                    self.postgres.update_task_status(video_id, "failed", error="Upload failed")
+                    self.postgres.update_task_status(video_id, "failed", error_message="Upload failed")
                     return False
                 
                 # Mark completed
-                self.postgres.update_task_status(video_id, "completed", pdf_url=pdf_url)
+                self.postgres.update_task_status(video_id, "done", pdf_url=pdf_url)
                 print(f"🎉 Success: {video_id}")
                 return True
                 
         except Exception as e:
-            self.postgres.update_task_status(video_id, "failed", error=str(e))
+            self.postgres.update_task_status(video_id, "failed", error_message=str(e))
             return False
     
     def _generate_superior_pdf(self, video_path: Path, pdf_path: Path) -> bool:

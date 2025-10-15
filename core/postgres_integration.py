@@ -148,6 +148,7 @@ class WorkerPostgresClient:
                 cur.execute("""
                     SELECT * FROM video_tasks 
                     WHERE status IN ('in_queue', 'uploaded')
+                       OR (status = 'processing' AND processing_start < NOW() - INTERVAL '10 minutes')
                     ORDER BY created_at ASC
                     LIMIT %s
                 """, (limit,))
