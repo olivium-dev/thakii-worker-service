@@ -50,8 +50,13 @@ jobs:
             git fetch origin
             git pull origin \$BRANCH_NAME
             
-            # Install dependencies
-            pip3 install --user -r requirements.txt
+            # Install dependencies in venv
+            if [ -d "venv" ]; then
+              source venv/bin/activate
+              pip install -r requirements.txt
+            else
+              pip3 install --user -r requirements.txt
+            fi
             
             # Restart service
             sudo systemctl restart thakii-worker
