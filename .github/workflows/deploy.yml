@@ -50,12 +50,19 @@ jobs:
             git fetch origin
             git pull origin \$BRANCH_NAME
             
-            # Install dependencies in venv
+            # Check and install dependencies only if needed
             if [ -d "venv" ]; then
               source venv/bin/activate
-              pip install -r requirements.txt
+              echo "Checking if key packages are installed..."
+              if pip show opencv-python psycopg2-binary boto3 > /dev/null 2>&1; then
+                echo "✅ Key packages already installed, skipping pip install"
+              else
+                echo "📦 Installing missing packages..."
+                pip install -r requirements.txt
+              fi
             else
-              pip3 install --user -r requirements.txt
+              echo "⚠️  No venv found, installing with --break-system-packages"
+              pip3 install --user -r requirements.txt --break-system-packages
             fi
             
             # Restart service
