@@ -104,7 +104,7 @@ class EnhancedWorker:
                 
                 if pending_tasks:
                     for task in pending_tasks:
-                        video_id = task.get('id')
+                        video_id = task.get('video_id')
                         if video_id:
                             self.process_video(video_id)
                 else:
