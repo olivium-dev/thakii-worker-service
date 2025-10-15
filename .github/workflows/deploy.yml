@@ -20,27 +20,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
       
-      - name: Install sshpass
-        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Setup SSH Connection via Cloudflare
+        uses: ./.github/actions/cloudflare-ssh
+        with:
+          ssh-private-key: ${{ secrets.THAKII_SSH_PRIVATE_KEY }}
+          server-hostname: ${{ env.SERVER_HOST }}
+          server-user: ${{ env.SERVER_USER }}
+          host-alias: 'thakii-server'
       
       - name: Deploy to server
-        env:
-          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
         run: |
-          # Deploy worker service via SSH tunnel (DNS-only, not proxied)
-          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 $SERVER_USER@$SERVER_HOST << 'EOF'
+          ssh thakii-server << 'EOF'
             set -e
             
             echo "=== Deploying Worker Service ==="
             cd $DEPLOY_PATH || exit 1
             
-            # Get current branch name from GitHub
-            BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-            echo "Deploying branch: $BRANCH_NAME"
+            # Get current branch name
+            BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+            echo "Current branch: $BRANCH_NAME"
             
-            # Fetch and checkout branch
+            # Fetch and pull latest changes
             git fetch origin
-            git checkout $BRANCH_NAME
             git pull origin $BRANCH_NAME
             
             # Install dependencies
@@ -55,30 +56,22 @@ jobs:
             
             echo "=== Worker deployment complete ==="
           EOF
+        env:
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
       
       - name: Verify deployment
-        env:
-          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
         run: |
-          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 $SERVER_USER@$SERVER_HOST << 'EOF'
-            # Wait for service to be ready
-            sleep 5
-            
-            # Check health endpoint (if available)
-            HEALTH_CHECK=$(curl -s http://localhost:9000/health 2>/dev/null | jq -r '.status' || echo "unknown")
-            
-            if [ "$HEALTH_CHECK" == "healthy" ]; then
-              echo "✅ Worker is healthy"
+          # Wait for service to be ready
+          sleep 5
+          
+          # Check if service is running via SSH
+          ssh thakii-server << 'EOF'
+            if sudo systemctl is-active --quiet thakii-worker; then
+              echo "✅ Worker service is running"
               exit 0
             else
-              # Check if service is running
-              if sudo systemctl is-active --quiet thakii-worker; then
-                echo "✅ Worker service is running"
-                exit 0
-              else
-                echo "❌ Worker service is not running"
-                exit 1
-              fi
+              echo "❌ Worker service is not running"
+              exit 1
             fi
           EOF
       
@@ -90,4 +83,3 @@ jobs:
           else
             echo "❌ Deployment failed"
           fi
-
