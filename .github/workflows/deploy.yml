@@ -31,6 +31,7 @@ jobs:
       - name: Deploy to server
         env:
           SSH_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
         run: |
           sshpass -p "$SSH_PASSWORD" ssh thakii-server << 'EOF'
             set -e
@@ -58,8 +59,6 @@ jobs:
             
             echo "=== Worker deployment complete ==="
           EOF
-        env:
-          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
       
       - name: Verify deployment
         env:
