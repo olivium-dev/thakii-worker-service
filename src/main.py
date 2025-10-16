@@ -59,14 +59,46 @@ class CommandLineArgRunner:
                 try:
                     import whisper
                     import os
+                    import torch
                     
-                    # Load Whisper model
-                    print("📥 Loading Whisper model...")
-                    model = whisper.load_model("base")  # Start with base for speed
+                    # Load Whisper large-v3 model for maximum accuracy
+                    model_name = "large-v3"
+                    print(f"📥 Loading Whisper {model_name} model (most accurate, may take 2-3 min first time)...")
                     
-                    # Transcribe the video
-                    print("🎵 Transcribing audio from video...")
-                    result = model.transcribe(video_filepath, language="en", word_timestamps=True)
+                    # Detect best device
+                    if torch.cuda.is_available():
+                        device = "cuda"
+                    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                        device = "mps"
+                    else:
+                        device = "cpu"
+                    
+                    model = whisper.load_model(model_name, device=device)
+                    print(f"✅ Model loaded on {device}")
+                    
+                    # Transcribe with MAXIMUM ACCURACY settings
+                    print("🎵 Transcribing audio with maximum accuracy (large-v3 + optimized params)...")
+                    result = model.transcribe(
+                        video_filepath,
+                        language="en",                           # Specify language
+                        task="transcribe",                       # Explicit task
+                        temperature=0.0,                         # Deterministic (no randomness)
+                        beam_size=5,                            # Search 5 best paths
+                        best_of=5,                              # Try 5 times, pick best
+                        patience=2.0,                           # Wait longer for better results
+                        length_penalty=1.0,                     # Prefer natural length
+                        suppress_tokens=[-1],                   # Suppress unwanted tokens
+                        initial_prompt="This is a lecture or educational video with clear, professional speech. Please transcribe every word accurately.",
+                        condition_on_previous_text=True,        # Use context from previous segments
+                        word_timestamps=True,                   # Word-level timing
+                        prepend_punctuations="\"'"¿([{-",      # Better punctuation
+                        append_punctuations="\"'.。,，!！?？:：")]}、", # Better punctuation
+                        compression_ratio_threshold=2.4,        # Quality filter
+                        logprob_threshold=-1.0,                # Confidence filter
+                        no_speech_threshold=0.6,               # Silence detection
+                        fp16=False,                            # Full precision
+                        verbose=True                           # Show progress
+                    )
                     
                     # Save to SRT file
                     srt_path = video_filepath.rsplit(".", 1)[0] + ".srt"

@@ -10,6 +10,7 @@ import time
 import tempfile
 import subprocess
 from pathlib import Path
+import shutil
 
 # Import Firebase integration
 from core.postgres_integration import postgres_client
@@ -19,9 +20,41 @@ class EnhancedWorker:
     def __init__(self):
         self.postgres = postgres_client
         self.s3 = s3_client
+        
+        # Configure intelligent storage selection
+        self.temp_base_dir = self._get_temp_storage_path()
+        
         print("🚀 Enhanced Worker with PostgreSQL Integration")
         print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}")
         print(f"   S3: {'✅' if self.s3.is_available() else '❌'}")
+        print(f"   Temp Storage: {self.temp_base_dir}")
+    
+    def _get_temp_storage_path(self):
+        """
+        Intelligently select storage path with automatic fallback
+        Priority:
+        1. External SSD at /mnt/external-ssd (if available and writable)
+        2. Environment variable TEMP_STORAGE_PATH
+        3. System temp directory (fallback)
+        """
+        # Check for external SSD
+        external_ssd = Path("/mnt/external-ssd/temp")
+        if external_ssd.exists() and os.access(external_ssd, os.W_OK):
+            print(f"   💾 Using external SSD: {external_ssd}")
+            return str(external_ssd)
+        
+        # Check environment variable
+        env_path = os.getenv('TEMP_STORAGE_PATH')
+        if env_path:
+            env_path = Path(env_path)
+            if env_path.exists() and os.access(env_path, os.W_OK):
+                print(f"   📁 Using env storage: {env_path}")
+                return str(env_path)
+        
+        # Fallback to system temp
+        system_temp = Path(tempfile.gettempdir())
+        print(f"   ⚠️  Using system temp (fallback): {system_temp}")
+        return str(system_temp)
     
     def process_video(self, video_id: str, s3_key: str = None, filename: str = None) -> bool:
         print(f"\n🎯 Processing: {video_id}")
@@ -44,10 +77,13 @@ class EnhancedWorker:
             filename = filename or task.get('filename', f'{video_id}.mp4')
             s3_key = s3_key or task.get('s3_key') or task.get('s3_path')
             
-            with tempfile.TemporaryDirectory() as temp_dir:
+            # Use intelligent storage path (external SSD if available, else fallback)
+            with tempfile.TemporaryDirectory(dir=self.temp_base_dir) as temp_dir:
                 temp_path = Path(temp_dir)
                 video_path = temp_path / filename
                 pdf_path = temp_path / f"{video_id}.pdf"
+                
+                print(f"   📁 Using temp directory: {temp_dir}")
                 
                 # Download video (use exact s3_key if available)
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
