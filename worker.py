@@ -24,10 +24,11 @@ class EnhancedWorker:
         # Configure intelligent storage selection
         self.temp_base_dir = self._get_temp_storage_path()
         
-        print("🚀 Enhanced Worker with PostgreSQL Integration")
-        print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}")
-        print(f"   S3: {'✅' if self.s3.is_available() else '❌'}")
-        print(f"   Temp Storage: {self.temp_base_dir}")
+        print("🚀 Enhanced Worker with PostgreSQL Integration", flush=True)
+        print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}", flush=True)
+        print(f"   S3: {'✅' if self.s3.is_available() else '❌'}", flush=True)
+        print(f"   Temp Storage: {self.temp_base_dir}", flush=True)
+        sys.stdout.flush()
     
     def _get_temp_storage_path(self):
         """
@@ -40,7 +41,7 @@ class EnhancedWorker:
         # Check for external SSD
         external_ssd = Path("/mnt/external-ssd/temp")
         if external_ssd.exists() and os.access(external_ssd, os.W_OK):
-            print(f"   💾 Using external SSD: {external_ssd}")
+            print(f"   💾 Using external SSD: {external_ssd}", flush=True)
             return str(external_ssd)
         
         # Check environment variable
@@ -48,18 +49,18 @@ class EnhancedWorker:
         if env_path:
             env_path = Path(env_path)
             if env_path.exists() and os.access(env_path, os.W_OK):
-                print(f"   📁 Using env storage: {env_path}")
+                print(f"   📁 Using env storage: {env_path}", flush=True)
                 return str(env_path)
         
         # Fallback to system temp
         system_temp = Path(tempfile.gettempdir())
-        print(f"   ⚠️  Using system temp (fallback): {system_temp}")
+        print(f"   ⚠️  Using system temp (fallback): {system_temp}", flush=True)
         return str(system_temp)
     
     def process_video(self, video_id: str, s3_key: str = None, filename: str = None) -> bool:
-        print(f"\n🎯 Processing: {video_id}")
+        print(f"\n🎯 Processing: {video_id}", flush=True)
         if s3_key:
-            print(f"   🔑 S3 Key: {s3_key}")
+            print(f"   🔑 S3 Key: {s3_key}", flush=True)
         if filename:
             print(f"   📁 Filename: {filename}")
         
@@ -83,7 +84,8 @@ class EnhancedWorker:
                 video_path = temp_path / filename
                 pdf_path = temp_path / f"{video_id}.pdf"
                 
-                print(f"   📁 Using temp directory: {temp_dir}")
+                print(f"   📁 Using temp directory: {temp_dir}", flush=True)
+                sys.stdout.flush()
                 
                 # Download video (use exact s3_key if available)
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
@@ -132,7 +134,8 @@ class EnhancedWorker:
             return False
     
     def run_polling_loop(self):
-        print("🔄 Starting polling loop...")
+        print("🔄 Starting polling loop...", flush=True)
+        sys.stdout.flush()
         
         while True:
             try:
@@ -144,14 +147,14 @@ class EnhancedWorker:
                         if video_id:
                             self.process_video(video_id)
                 else:
-                    print("⏳ No pending tasks...")
+                    print("⏳ No pending tasks...", flush=True)
                 
                 time.sleep(10)
             except KeyboardInterrupt:
-                print("\n🛑 Worker stopped")
+                print("\n🛑 Worker stopped", flush=True)
                 break
             except Exception as e:
-                print(f"💥 Error: {e}")
+                print(f"💥 Error: {e}", flush=True)
                 time.sleep(30)
 
 def main():
@@ -161,7 +164,8 @@ def main():
         command = sys.argv[1]
         
         if command == "--process-all":
-            print("🔄 Processing all pending tasks from Firebase...")
+            print("🔄 Processing all pending tasks from PostgreSQL...", flush=True)
+            sys.stdout.flush()
             # Run polling loop for all pending tasks
             worker.run_polling_loop()
         elif command == "--health-check":
