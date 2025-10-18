@@ -120,10 +120,13 @@ jobs:
         ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="cloudflared access ssh --hostname %h" ec2-user@vps-71.fds-1.com "
           cd thakii-worker-service &&
           source venv/bin/activate &&
-          # Test Python imports
-          python3 -c 'import sys; sys.path.insert(0, \"src\"); from main import CommandLineArgRunner; print(\"✅ Main imports successful\")' &&
+          # Test core integrations
           python3 -c 'from core.postgres_integration import postgres_client; print(\"✅ PostgreSQL integration available:\", postgres_client.is_available())' &&
           python3 -c 'from core.s3_integration import s3_client; print(\"✅ S3 integration available:\", s3_client.is_available())' &&
+          # Test worker script
+          python3 -c 'import worker; print(\"✅ Worker module imports successful\")' &&
+          # Test API server
+          python3 -c 'import api_server; print(\"✅ API server module imports successful\")' &&
           echo 'Pre-deployment tests passed'
         "
         
