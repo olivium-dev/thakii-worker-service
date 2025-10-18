@@ -81,8 +81,9 @@ jobs:
         ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="cloudflared access ssh --hostname %h" ec2-user@vps-71.fds-1.com "
           cd thakii-worker-service &&
           git fetch origin &&
-          git reset --hard origin/\$(git branch --show-current) &&
-          echo 'Code updated successfully'
+          git checkout feature/whisper-ai-installation-pipeline &&
+          git reset --hard origin/feature/whisper-ai-installation-pipeline &&
+          echo 'Code updated successfully to feature/whisper-ai-installation-pipeline branch'
         "
         
     - name: Update dependencies
