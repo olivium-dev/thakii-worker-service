@@ -26,7 +26,7 @@ jobs:
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
         TUNNEL_PID=$!
         sleep 5
-        sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'echo "SSH connection successful"'
+        sshpass -p '12344321' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'echo "SSH connection successful"'
         kill $TUNNEL_PID 2>/dev/null || true
         
     - name: Setup repository
@@ -35,7 +35,7 @@ jobs:
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
         TUNNEL_PID=$!
         sleep 5
-        sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'if [ ! -d "thakii-worker-service" ]; then git clone https://github.com/olivium-dev/thakii-worker-service.git; fi'
+        sshpass -p '12344321' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'if [ ! -d "thakii-worker-service" ]; then git clone https://github.com/olivium-dev/thakii-worker-service.git; fi'
         kill $TUNNEL_PID 2>/dev/null || true
         
     - name: Update code
@@ -44,7 +44,7 @@ jobs:
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
         TUNNEL_PID=$!
         sleep 5
-        sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'cd thakii-worker-service && git fetch origin && git checkout feature/whisper-ai-installation-pipeline && git reset --hard origin/feature/whisper-ai-installation-pipeline'
+        sshpass -p '12344321' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'cd thakii-worker-service && git fetch origin && git checkout feature/whisper-ai-installation-pipeline && git reset --hard origin/feature/whisper-ai-installation-pipeline'
         kill $TUNNEL_PID 2>/dev/null || true
         
     - name: Setup Python environment
@@ -53,7 +53,7 @@ jobs:
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
         TUNNEL_PID=$!
         sleep 5
-        sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'cd thakii-worker-service && if [ ! -d "venv" ]; then python3 -m venv venv; fi && source venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt'
+        sshpass -p '12344321' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'cd thakii-worker-service && if [ ! -d "venv" ]; then python3 -m venv venv; fi && source venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt'
         kill $TUNNEL_PID 2>/dev/null || true
         
     - name: Stop existing services
@@ -62,7 +62,7 @@ jobs:
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
         TUNNEL_PID=$!
         sleep 5
-        sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'pkill -f "worker.py" || true; pkill -f "api_server.py" || true; sleep 2'
+        sshpass -p '12344321' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'pkill -f "worker.py" || true; pkill -f "api_server.py" || true; sleep 2'
         kill $TUNNEL_PID 2>/dev/null || true
         
     - name: Start worker service
@@ -71,7 +71,7 @@ jobs:
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
         TUNNEL_PID=$!
         sleep 5
-        sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'cd thakii-worker-service && source venv/bin/activate && nohup python3 worker.py --process-all > worker.log 2>&1 & echo "Worker started with PID: $!"'
+        sshpass -p '12344321' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'cd thakii-worker-service && source venv/bin/activate && nohup python3 worker.py --process-all > worker.log 2>&1 & echo "Worker started with PID: $!"'
         kill $TUNNEL_PID 2>/dev/null || true
         
     - name: Start API service
@@ -80,7 +80,7 @@ jobs:
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
         TUNNEL_PID=$!
         sleep 5
-        sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'cd thakii-worker-service && source venv/bin/activate && nohup python3 api_server.py > api_server.log 2>&1 & echo "API started with PID: $!"'
+        sshpass -p '12344321' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'cd thakii-worker-service && source venv/bin/activate && nohup python3 api_server.py > api_server.log 2>&1 & echo "API started with PID: $!"'
         kill $TUNNEL_PID 2>/dev/null || true
         
     - name: Verify deployment
@@ -89,7 +89,7 @@ jobs:
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
         TUNNEL_PID=$!
         sleep 5
-        sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'echo "=== Process Status ==="; ps aux | grep -E "(worker|api_server)" | grep -v grep || echo "No processes found"'
+        sshpass -p '12344321' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 'echo "=== Process Status ==="; ps aux | grep -E "(worker|api_server)" | grep -v grep || echo "No processes found"'
         kill $TUNNEL_PID 2>/dev/null || true
         
     - name: Summary
