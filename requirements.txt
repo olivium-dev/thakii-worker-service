@@ -78,8 +78,8 @@ Flask==2.3.3
 Flask-CORS==4.0.0
 
 # Whisper AI for Real Transcription
-openai-whisper==20231117
-torch==2.1.0
-torchvision==0.16.0
-torchaudio==2.1.0
+openai-whisper
+torch
+torchvision
+torchaudio
 numpy<2

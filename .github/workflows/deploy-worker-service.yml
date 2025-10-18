@@ -1,4 +1,4 @@
-name: Deploy Thakii Worker Service
+name: Deploy Thakii Worker Service v2
 
 on:
   push:
