@@ -61,9 +61,9 @@ class CommandLineArgRunner:
                     import os
                     import torch
                     
-                    # Load Whisper large-v3 model for maximum accuracy
-                    model_name = "large-v3"
-                    print(f"📥 Loading Whisper {model_name} model (most accurate, may take 2-3 min first time)...")
+                    # Load Whisper tiny model for maximum speed
+                    model_name = "tiny"
+                    print(f"📥 Loading Whisper {model_name} model (fastest processing, good for large videos)...")
                     
                     # Detect best device
                     if torch.cuda.is_available():
@@ -76,8 +76,8 @@ class CommandLineArgRunner:
                     model = whisper.load_model(model_name, device=device)
                     print(f"✅ Model loaded on {device}")
                     
-                    # Transcribe with MAXIMUM ACCURACY settings
-                    print("🎵 Transcribing audio with maximum accuracy (large-v3 + optimized params)...")
+                    # Transcribe with optimized settings for tiny model
+                    print("🎵 Transcribing audio with Whisper tiny model (fastest speed)...")
                     result = model.transcribe(
                         video_filepath,
                         language="en",                           # Specify language
@@ -91,8 +91,8 @@ class CommandLineArgRunner:
                         initial_prompt="This is a lecture or educational video with clear, professional speech. Please transcribe every word accurately.",
                         condition_on_previous_text=True,        # Use context from previous segments
                         word_timestamps=True,                   # Word-level timing
-                        prepend_punctuations="\"'"¿([{-",      # Better punctuation
-                        append_punctuations="\"'.。,，!！?？:：")]}、", # Better punctuation
+                        prepend_punctuations="\"'([{-",      # Better punctuation
+                        append_punctuations="\"'.,!?:)]}",  # Better punctuation
                         compression_ratio_threshold=2.4,        # Quality filter
                         logprob_threshold=-1.0,                # Confidence filter
                         no_speech_threshold=0.6,               # Silence detection
