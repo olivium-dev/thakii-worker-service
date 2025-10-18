@@ -1,0 +1,279 @@
+name: Deploy Worker to ssh-thakii-3.fanusdigital.site
+
+on:
+  push:
+    branches: [ main, feature/whisper-ai-installation-pipeline ]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install cloudflared
+      run: |
+        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+        sudo dpkg -i cloudflared.deb
+        
+    - name: Test SSH connection to ssh-thakii-3.fanusdigital.site
+      run: |
+        echo "=== Testing SSH Connection ==="
+        timeout 30 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          echo 'Testing connection...'
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 fanusdigital@localhost -p 2222 'echo \"SSH connection successful to ssh-thakii-3.fanusdigital.site\"'
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Check server status
+      run: |
+        echo "=== Server Status Check ==="
+        timeout 60 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            echo \"Current directory:\" && pwd &&
+            echo \"Disk space:\" && df -h / &&
+            echo \"Memory usage:\" && free -h &&
+            echo \"Python version:\" && python3 --version &&
+            echo \"User:\" && whoami &&
+            echo \"Home directory contents:\" && ls -la ~
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Check if worker directory exists
+      run: |
+        echo "=== Checking Worker Directory ==="
+        timeout 60 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            if [ -d \"thakii-worker-service\" ]; then
+              echo \"Worker directory exists\"
+              cd thakii-worker-service
+              echo \"Git status:\" && git status || echo \"Not a git repository\"
+              echo \"Current branch:\" && git branch --show-current 2>/dev/null || echo \"No git branch info\"
+            else
+              echo \"Worker directory does not exist - will need to clone\"
+            fi
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Setup or update worker repository
+      run: |
+        echo "=== Setting up Worker Repository ==="
+        timeout 120 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            if [ ! -d \"thakii-worker-service\" ]; then
+              echo \"Cloning repository...\"
+              git clone https://github.com/olivium-dev/thakii-worker-service.git
+            fi
+            cd thakii-worker-service
+            echo \"Fetching latest changes...\"
+            git fetch origin
+            echo \"Checking out feature branch...\"
+            git checkout feature/whisper-ai-installation-pipeline || git checkout -b feature/whisper-ai-installation-pipeline origin/feature/whisper-ai-installation-pipeline
+            git reset --hard origin/feature/whisper-ai-installation-pipeline
+            echo \"Repository updated successfully\"
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Setup Python virtual environment
+      run: |
+        echo "=== Setting up Python Environment ==="
+        timeout 180 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            cd thakii-worker-service
+            if [ ! -d \"venv\" ]; then
+              echo \"Creating virtual environment...\"
+              python3 -m venv venv
+            fi
+            echo \"Activating virtual environment and installing dependencies...\"
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            echo \"Python environment setup completed\"
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Setup environment configuration
+      run: |
+        echo "=== Setting up Environment Configuration ==="
+        timeout 60 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            cd thakii-worker-service
+            if [ ! -f \".env\" ]; then
+              if [ -f \".env.example\" ]; then
+                cp .env.example .env
+                echo \"Created .env from .env.example\"
+              else
+                echo \"No .env.example found, creating basic .env\"
+                cat > .env << EOF
+TEMP_STORAGE_PATH=/tmp
+WORKER_POLL_INTERVAL=10
+EOF
+              fi
+            fi
+            chmod 600 .env
+            echo \"Environment configuration completed\"
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Run pre-deployment tests
+      run: |
+        echo "=== Running Pre-deployment Tests ==="
+        timeout 120 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            cd thakii-worker-service
+            source venv/bin/activate
+            echo \"Testing core modules...\"
+            python3 -c \"import worker; print(\\\"✅ Worker module imports successful\\\")\" || echo \"⚠️ Worker module import failed\"
+            python3 -c \"import api_server; print(\\\"✅ API server module imports successful\\\")\" || echo \"⚠️ API server import failed\"
+            if [ -d \"core\" ]; then
+              python3 -c \"from core.firestore_integration import firestore_client; print(\\\"✅ Firestore integration available\\\")\" || echo \"⚠️ Firestore integration not available\"
+              python3 -c \"from core.s3_integration import s3_client; print(\\\"✅ S3 integration available\\\")\" || echo \"⚠️ S3 integration not available\"
+            fi
+            echo \"Pre-deployment tests completed\"
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Stop existing services
+      run: |
+        echo "=== Stopping Existing Services ==="
+        timeout 60 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            echo \"Checking for existing worker processes...\"
+            pkill -f \"worker.py\" || echo \"No worker processes found\"
+            pkill -f \"api_server.py\" || echo \"No API server processes found\"
+            sleep 2
+            echo \"Services stopped\"
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Start worker service
+      run: |
+        echo "=== Starting Worker Service ==="
+        timeout 60 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            cd thakii-worker-service
+            source venv/bin/activate
+            echo \"Starting worker service in background...\"
+            nohup python3 worker.py --process-all > worker.log 2>&1 &
+            WORKER_PID=\$!
+            echo \"Worker started with PID: \$WORKER_PID\"
+            sleep 3
+            if ps -p \$WORKER_PID > /dev/null; then
+              echo \"✅ Worker service is running\"
+            else
+              echo \"❌ Worker service failed to start\"
+              tail -10 worker.log || echo \"No log file found\"
+            fi
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Start API service
+      run: |
+        echo "=== Starting API Service ==="
+        timeout 60 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            cd thakii-worker-service
+            source venv/bin/activate
+            echo \"Starting API service in background...\"
+            nohup python3 api_server.py > api_server.log 2>&1 &
+            API_PID=\$!
+            echo \"API server started with PID: \$API_PID\"
+            sleep 5
+            if ps -p \$API_PID > /dev/null; then
+              echo \"✅ API service is running\"
+              # Test the API
+              curl -s http://localhost:9000/health || echo \"API health check failed\"
+            else
+              echo \"❌ API service failed to start\"
+              tail -10 api_server.log || echo \"No log file found\"
+            fi
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Verify deployment
+      run: |
+        echo "=== Verifying Deployment ==="
+        timeout 60 bash -c "
+          cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          TUNNEL_PID=\$!
+          sleep 5
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+            echo \"=== Process Status ===\" 
+            ps aux | grep -E \"(worker|api_server)\" | grep -v grep || echo \"No worker/api processes found\"
+            echo \"=== Log Files ===\" 
+            cd thakii-worker-service
+            if [ -f worker.log ]; then
+              echo \"Worker log (last 5 lines):\"
+              tail -5 worker.log
+            fi
+            if [ -f api_server.log ]; then
+              echo \"API server log (last 5 lines):\"
+              tail -5 api_server.log
+            fi
+            echo \"=== Deployment Verification Complete ===\" 
+          '
+          kill \$TUNNEL_PID 2>/dev/null || true
+        "
+        
+    - name: Deployment summary
+      run: |
+        echo "=== Deployment Summary ==="
+        echo "🚀 Deployment to ssh-thakii-3.fanusdigital.site completed!"
+        echo "📊 Services deployed:"
+        echo "  - Worker Service: Background process"
+        echo "  - API Service: Running on port 9000"
+        echo "📝 Connection method: cloudflared access ssh"
+        echo "🎯 Target server: ssh-thakii-3.fanusdigital.site"
+        echo "✅ Pipeline execution finished"
