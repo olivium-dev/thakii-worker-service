@@ -24,10 +24,12 @@ jobs:
       with:
         python-version: '3.9'
         
-    - name: Install cloudflared
+    - name: Install cloudflared and sshpass
       run: |
         curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
         sudo dpkg -i cloudflared.deb
+        sudo apt-get update
+        sudo apt-get install -y sshpass
         
     - name: Test SSH connection to ssh-thakii-3.fanusdigital.site
       run: |
@@ -37,7 +39,7 @@ jobs:
           TUNNEL_PID=\$!
           sleep 5
           echo 'Testing connection...'
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 fanusdigital@localhost -p 2222 'echo \"SSH connection successful to ssh-thakii-3.fanusdigital.site\"'
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 fanusdigital@localhost -p 2222 'echo \"SSH connection successful to ssh-thakii-3.fanusdigital.site\"'
           kill \$TUNNEL_PID 2>/dev/null || true
         "
         
@@ -48,7 +50,7 @@ jobs:
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             echo \"Current directory:\" && pwd &&
             echo \"Disk space:\" && df -h / &&
             echo \"Memory usage:\" && free -h &&
@@ -66,7 +68,7 @@ jobs:
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             if [ -d \"thakii-worker-service\" ]; then
               echo \"Worker directory exists\"
               cd thakii-worker-service
@@ -86,7 +88,7 @@ jobs:
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             if [ ! -d \"thakii-worker-service\" ]; then
               echo \"Cloning repository...\"
               git clone https://github.com/olivium-dev/thakii-worker-service.git
@@ -109,7 +111,7 @@ jobs:
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             cd thakii-worker-service
             if [ ! -d \"venv\" ]; then
               echo \"Creating virtual environment...\"
@@ -131,7 +133,7 @@ jobs:
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             cd thakii-worker-service
             if [ ! -f \".env\" ]; then
               if [ -f \".env.example\" ]; then
@@ -158,7 +160,7 @@ EOF
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             cd thakii-worker-service
             source venv/bin/activate
             echo \"Testing core modules...\"
@@ -180,7 +182,7 @@ EOF
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             echo \"Checking for existing worker processes...\"
             pkill -f \"worker.py\" || echo \"No worker processes found\"
             pkill -f \"api_server.py\" || echo \"No API server processes found\"
@@ -197,7 +199,7 @@ EOF
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             cd thakii-worker-service
             source venv/bin/activate
             echo \"Starting worker service in background...\"
@@ -222,7 +224,7 @@ EOF
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             cd thakii-worker-service
             source venv/bin/activate
             echo \"Starting API service in background...\"
@@ -249,7 +251,7 @@ EOF
           cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
           TUNNEL_PID=\$!
           sleep 5
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
+          sshpass -p 'P@ssw0rd768' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fanusdigital@localhost -p 2222 '
             echo \"=== Process Status ===\" 
             ps aux | grep -E \"(worker|api_server)\" | grep -v grep || echo \"No worker/api processes found\"
             echo \"=== Log Files ===\" 
