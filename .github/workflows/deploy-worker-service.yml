@@ -121,7 +121,7 @@ jobs:
           cd thakii-worker-service &&
           source venv/bin/activate &&
           # Test core integrations
-          python3 -c 'from core.postgres_integration import postgres_client; print(\"✅ PostgreSQL integration available:\", postgres_client.is_available())' &&
+          python3 -c 'from core.firestore_integration import firestore_client; print(\"✅ Firestore integration available:\", firestore_client.is_available())' &&
           python3 -c 'from core.s3_integration import s3_client; print(\"✅ S3 integration available:\", s3_client.is_available())' &&
           # Test worker script
           python3 -c 'import worker; print(\"✅ Worker module imports successful\")' &&
