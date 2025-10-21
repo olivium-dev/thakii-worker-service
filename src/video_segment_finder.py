@@ -130,18 +130,87 @@ class VideoSegmentFinder:
         total_frames = int(video_reader.get(cv2.CAP_PROP_FRAME_COUNT))
         duration_seconds = total_frames / fps if fps > 0 else 0
         
-        if duration_seconds < 60:
-            # Short video - process more frames for better detection
-            frame_skip = max(1, fps // 4)  # Every 0.25 seconds
-            print(f"🎯 Short video ({duration_seconds:.1f}s): sampling every {frame_skip} frames (every ~0.25s)")
-        elif duration_seconds > 1800:  # 30+ minutes
-            # Long video - can skip more frames
-            frame_skip = max(1, fps)  # Every 1 second
-            print(f"🎯 Long video ({duration_seconds:.1f}s): sampling every {frame_skip} frames (every ~1s)")
+        # Logarithmic/Adaptive Sampling Strategy
+        import math
+        
+        if duration_seconds <= 60:  # 1 minute
+            # Short video: 1 shot every 5 seconds = ~12 samples
+            sample_interval = 5.0
+            target_samples = int(duration_seconds / sample_interval)
+            print(f"🎯 Short video ({duration_seconds:.1f}s): {target_samples} samples, every {sample_interval}s")
+        elif duration_seconds <= 300:  # 5 minutes
+            # Medium video: aim for ~15-20 samples
+            target_samples = 15
+            sample_interval = duration_seconds / target_samples
+            print(f"🎯 Medium video ({duration_seconds:.1f}s): {target_samples} samples, every {sample_interval:.1f}s")
         else:
-            # Medium video - balanced sampling
-            frame_skip = max(1, fps // 2)  # Every 0.5 seconds
-            print(f"🎯 Medium video ({duration_seconds:.1f}s): sampling every {frame_skip} frames (every ~0.5s)")
+            # Long video: logarithmic scaling
+            # Use log base 2 of minutes to scale samples
+            minutes = duration_seconds / 60
+            log_base = math.log(minutes, 2)
+            target_samples = int(10 + log_base * 5)  # Scale samples logarithmically
+            target_samples = min(target_samples, 50)  # Cap at 50 samples for very long videos
+            sample_interval = duration_seconds / target_samples
+            print(f"🎯 Long video ({duration_seconds:.1f}s = {minutes:.1f}min): {target_samples} samples, every {sample_interval:.1f}s (log scaling)")
+        
+        # CRITICAL FIX: Don't use sample_interval for scene detection!
+        # sample_interval is only for PASS 1 sampling
+        # For PASS 2 scene detection, use a fixed small interval
+        detection_interval = 0.5  # Check every 0.5 seconds for scene changes
+        frame_skip = max(1, int(fps * detection_interval))
+        print(f"🔍 Scene detection: checking every {frame_skip} frames ({detection_interval}s)")
+
+        # PASS 1: Sample frames to calculate adaptive thresholds
+        print("🔍 PASS 1: Sampling frames to calculate optimal thresholds...")
+        sample_frames = []
+        sample_diffs = []
+        
+        # Take samples at logarithmic intervals
+        for i in range(min(target_samples, 20)):  # Cap samples for performance
+            sample_position = int(i * (total_frames / min(target_samples, 20)))
+            video_reader.set(cv2.CAP_PROP_POS_FRAMES, sample_position)
+            is_read, frame = video_reader.read()
+            if is_read:
+                sample_frames.append(frame)
+                if len(sample_frames) > 1:
+                    # Compare with previous sample using low threshold
+                    diff = cv2.absdiff(sample_frames[-2], sample_frames[-1])
+                    mask = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+                    num_changed = np.sum(mask > 5)  # Use low threshold for sampling
+                    sample_diffs.append(num_changed)
+        
+        # Calculate adaptive thresholds from samples
+        if sample_diffs and len(sample_diffs) > 2:
+            mean_change = np.mean(sample_diffs)
+            std_change = np.std(sample_diffs)
+            
+            # Set min_change to catch changes 1.5 std deviations below mean (more sensitive)
+            calculated_min_change = int(max(500, mean_change - (1.5 * std_change)))
+            
+            # Adjust threshold based on sample variance (more variance = lower threshold)
+            if mean_change > 0:
+                variance_ratio = std_change / mean_change
+                calculated_threshold = int(max(2, 6 - (variance_ratio * 4)))
+            else:
+                calculated_threshold = 5
+            
+            print(f"📊 Calculated Adaptive Thresholds:")
+            print(f"   Samples analyzed: {len(sample_diffs)}")
+            print(f"   Mean change: {mean_change:.0f} pixels")
+            print(f"   Std deviation: {std_change:.0f} pixels")
+            print(f"   Adaptive min_change: {calculated_min_change} (was {self.min_change})")
+            print(f"   Adaptive threshold: {calculated_threshold} (was {self.threshold})")
+            
+            # Override default thresholds with calculated values
+            self.min_change = calculated_min_change
+            self.threshold = calculated_threshold
+        else:
+            print("⚠️ Insufficient samples for threshold calculation, using defaults")
+            print(f"   Using min_change: {self.min_change}, threshold: {self.threshold}")
+        
+        # Reset video to beginning for PASS 2
+        video_reader.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        print("🔍 PASS 2: Scanning entire video with calculated thresholds...")
 
         while video_reader.isOpened():
             is_read, cur_frame = video_reader.read()
