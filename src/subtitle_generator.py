@@ -65,7 +65,7 @@ class SubtitleGenerator:
         start_time = datetime.datetime.now()
         print(f"Start generating enhanced subtitles at {start_time}")
 
-        if file_path.lower().endswith(('.mp4', '.mkv', '.mov', '.avi')):
+        if file_path.lower().endswith(('.mp4', '.mkv', '.mov', '.avi', '.ts')):
             audio_path = self.extract_audio(file_path)
         else:
             print(f"Non-video file detected, using {file_path} directly as audio source.")
