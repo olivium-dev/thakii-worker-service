@@ -2,6 +2,11 @@ name: Deploy Worker Service to thakii-03
 
 on:
   workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for deployment'
+        required: false
+        default: 'Manual deployment'
 
 jobs:
   deploy:
