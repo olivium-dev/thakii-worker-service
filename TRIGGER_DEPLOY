@@ -1,5 +1,2 @@
-# Trigger file for GitHub Actions deployment
 # Modify this file to trigger a deployment to thakii-03
-
-Deployment trigger: 2025-11-01 21:12:35
-Reason: Fix fpdf2 API compatibility issue
+Deployment trigger: 2025-11-01 21:57:51 - FFmpeg PATH fix
