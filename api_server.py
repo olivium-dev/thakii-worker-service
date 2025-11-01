@@ -12,6 +12,8 @@ import threading
 import time
 from pathlib import Path
 from flask import Flask, request, jsonify, send_file
+from flask_restx import Api, Resource, fields, Namespace
+from flask_cors import CORS
 import tempfile
 import subprocess
 import sys
@@ -28,6 +30,17 @@ except ImportError as e:
     main_runner = None
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
+
+# Initialize Flask-RESTX API with Swagger documentation
+api = Api(
+    app,
+    version='1.0',
+    title='Thakii Worker Service API',
+    description='Video processing API for converting lectures to PDF transcripts',
+    doc='/swagger/',  # Swagger UI will be available at /swagger/
+    prefix='/api/v1'
+)
 
 # Import Firebase integration (REQUIRED)
 from core.postgres_integration import postgres_client
@@ -35,6 +48,61 @@ print("✅ Firebase integration loaded - Local storage disabled")
 
 # Local task storage for API server (fallback when Firebase unavailable)
 tasks_storage = {}
+
+# Create API namespaces
+health_ns = Namespace('health', description='Health check operations')
+videos_ns = Namespace('videos', description='Video processing operations')
+api.add_namespace(health_ns, path='/health')
+api.add_namespace(videos_ns, path='/videos')
+
+# Swagger models
+video_upload_model = api.model('VideoUpload', {
+    'filename': fields.String(required=True, description='Video filename'),
+    'user_id': fields.String(required=True, description='User ID'),
+    'size': fields.Integer(description='File size in bytes'),
+    'content_type': fields.String(description='MIME type', default='video/mp4'),
+    'user_email': fields.String(description='User email address')
+})
+
+video_response_model = api.model('VideoResponse', {
+    'video_id': fields.String(description='Unique video identifier'),
+    'status': fields.String(description='Processing status'),
+    'filename': fields.String(description='Original filename'),
+    'created_at': fields.String(description='Upload timestamp'),
+    'message': fields.String(description='Response message')
+})
+
+video_list_model = api.model('VideoList', {
+    'videos': fields.List(fields.Nested(api.model('Video', {
+        'id': fields.String(description='Video ID'),
+        'filename': fields.String(description='Filename'),
+        'status': fields.String(description='Processing status'),
+        'created_at': fields.String(description='Creation date'),
+        'updated_at': fields.String(description='Last update'),
+        'size': fields.Integer(description='File size'),
+        'user_id': fields.String(description='User ID'),
+        'user_email': fields.String(description='User email'),
+        'pdf_url': fields.String(description='PDF download URL')
+    }))),
+    'total': fields.Integer(description='Total number of videos'),
+    'timestamp': fields.String(description='Response timestamp')
+})
+
+health_model = api.model('Health', {
+    'service': fields.String(description='Service name'),
+    'status': fields.String(description='Service status'),
+    'timestamp': fields.String(description='Current timestamp'),
+    'api_version': fields.String(description='API version'),
+    'database': fields.String(description='Database status'),
+    'storage': fields.String(description='Storage status'),
+    'endpoints': fields.Raw(description='Available endpoints')
+})
+
+error_model = api.model('Error', {
+    'error': fields.String(description='Error message'),
+    'message': fields.String(description='Detailed error description'),
+    'timestamp': fields.String(description='Error timestamp')
+})
 
 def cleanup_local_files(video_id):
     """Clean up local video and PDF files for a video_id"""
@@ -122,140 +190,217 @@ def real_video_processing(video_id, video_path):
         # Always clean up local files after processing (success or failure)
         cleanup_local_files(video_id)
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint - no authentication required"""
-    return jsonify({
-        "database": "Local",
-        "service": "Thakii Lecture2PDF Service",
-        "status": "healthy",
-        "storage": "Local",
-        "timestamp": datetime.datetime.now().isoformat(),
-        "api_version": "1.0",
-        "endpoints": {
-            "upload": "/upload",
-            "list": "/list", 
-            "download": "/download/{video_id}.pdf",
-            "process": "/process/{video_id}",
-            "generate": "/generate-pdf"
-        }
-    })
-
-@app.route('/upload', methods=['POST'])
-def upload_video():
-    """Upload video endpoint - no authentication required"""
-    try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
-        
-        filename = data.get('filename')
-        user_id = data.get('user_id')
-        size = data.get('size', 0)
-        content_type = data.get('content_type', 'video/mp4')
-        user_email = data.get('user_email', 'anonymous@thakii.dev')
-        
-        if not filename:
-            return jsonify({"error": "filename is required"}), 400
-        
-        if not user_id:
-            return jsonify({"error": "user_id is required"}), 400
-        
-        # Generate unique video ID
-        video_id = f"video-{uuid.uuid4().hex[:8]}"
-        
-        # Create task record
-        task = {
-            "id": video_id,
-            "filename": filename,
-            "size": size,
-            "content_type": content_type,
-            "user_id": user_id,
-            "user_email": user_email,
-            "status": "uploaded",
-            "created_at": datetime.datetime.now().isoformat(),
-            "updated_at": datetime.datetime.now().isoformat()
-        }
-        
-        # Store task in memory
-        tasks_storage[video_id] = task
-        
-        # Store in Firebase if available
-        try:
-            from core.postgres_integration import postgres_client
-            if postgres_client.is_available():
-                postgres_client.update_task_status(
-                    video_id, "uploaded",
-                    filename=filename,
-                    size=size,
-                    user_id=user_id,
-                    user_email=user_email,
-                    content_type=content_type
-                )
-        except Exception as e:
-            print(f"Firebase storage failed: {e}")
-        
-        return jsonify({
-            "video_id": video_id,
-            "status": "uploaded",
-            "message": "Video upload request received successfully",
-            "filename": filename,
-            "user_id": user_id,
-            "size": size,
-            "created_at": task["created_at"]
-        }), 201
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/list', methods=['GET'])
-def list_videos():
-    """List all videos endpoint - no authentication required"""
-    try:
-        videos = []
-        
-        # Get all videos from Firebase
-        all_tasks = postgres_client.get_all_tasks() if hasattr(postgres_client, 'get_all_tasks') else []
-        pending_tasks = postgres_client.get_pending_tasks() or []
-        
-        # If get_all_tasks is not available, try to get tasks by status
-        if not all_tasks and hasattr(postgres_client, 'db') and postgres_client.db:
-            try:
-                # Get all documents from video_tasks collection
-                docs = postgres_client.db.collection('video_tasks').stream()
-                all_tasks = []
-                for doc in docs:
-                    task_data = doc.to_dict()
-                    task_data['id'] = doc.id
-                    all_tasks.append(task_data)
-            except Exception as e:
-                print(f"Error getting all tasks: {e}")
-                all_tasks = pending_tasks  # Fallback to pending tasks
-        
-        # Convert Firebase tasks to API format
-        for task in all_tasks:
-            videos.append({
-                "id": task.get("id", "unknown"),
-                "filename": task.get("filename", "unknown"),
-                "status": task.get("status", "unknown"),
-                "created_at": task.get("upload_date", task.get("created_at", "")),
-                "updated_at": task.get("processing_end", task.get("updated_at", "")),
-                "size": task.get("size", 0),
-                "user_id": task.get("user_id", ""),
-                "user_email": task.get("user_email", ""),
-                "pdf_url": task.get("pdf_url", "")
-            })
-        
-        return jsonify({
-            "videos": videos,
-            "total": len(videos),
+@health_ns.route('/')
+class HealthCheck(Resource):
+    @health_ns.doc('health_check')
+    @health_ns.marshal_with(health_model)
+    def get(self):
+        """Health check endpoint - returns service status and available endpoints"""
+        return {
+            "database": "Local",
+            "service": "Thakii Lecture2PDF Service",
+            "status": "healthy",
+            "storage": "Local",
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "Firebase"
-        })
-        
-    except Exception as e:
-        return jsonify({"error": str(e), "source": "Firebase"}), 500
+            "api_version": "1.0",
+            "endpoints": {
+                "upload": "/api/v1/videos/upload",
+                "list": "/api/v1/videos/list", 
+                "download": "/api/v1/videos/download/{video_id}.pdf",
+                "process": "/api/v1/videos/process/{video_id}",
+                "generate": "/api/v1/videos/generate-pdf",
+                "swagger": "/swagger/"
+            }
+        }
+
+@videos_ns.route('/upload')
+class VideoUpload(Resource):
+    @videos_ns.doc('upload_video')
+    @videos_ns.expect(video_upload_model)
+    @videos_ns.marshal_with(video_response_model, code=201)
+    @videos_ns.response(400, 'Bad Request', error_model)
+    @videos_ns.response(500, 'Internal Server Error', error_model)
+    def post(self):
+        """Upload video metadata - creates a new video processing task"""
+        try:
+            data = request.get_json()
+            
+            if not data:
+                return {"error": "No JSON data provided", "timestamp": datetime.datetime.now().isoformat()}, 400
+            
+            filename = data.get('filename')
+            user_id = data.get('user_id')
+            size = data.get('size', 0)
+            content_type = data.get('content_type', 'video/mp4')
+            user_email = data.get('user_email', 'anonymous@thakii.dev')
+            
+            if not filename:
+                return {"error": "filename is required", "timestamp": datetime.datetime.now().isoformat()}, 400
+            
+            if not user_id:
+                return {"error": "user_id is required", "timestamp": datetime.datetime.now().isoformat()}, 400
+            
+            # Generate unique video ID
+            video_id = f"video-{uuid.uuid4().hex[:8]}"
+            
+            # Create task record
+            task = {
+                "id": video_id,
+                "filename": filename,
+                "size": size,
+                "content_type": content_type,
+                "user_id": user_id,
+                "user_email": user_email,
+                "status": "uploaded",
+                "created_at": datetime.datetime.now().isoformat(),
+                "updated_at": datetime.datetime.now().isoformat()
+            }
+            
+            # Store task in memory
+            tasks_storage[video_id] = task
+            
+            # Store in Firebase if available
+            try:
+                from core.postgres_integration import postgres_client
+                if postgres_client.is_available():
+                    postgres_client.update_task_status(
+                        video_id, "uploaded",
+                        filename=filename,
+                        size=size,
+                        user_id=user_id,
+                        user_email=user_email,
+                        content_type=content_type
+                    )
+            except Exception as e:
+                print(f"Firebase storage failed: {e}")
+            
+            return {
+                "video_id": video_id,
+                "status": "uploaded",
+                "message": "Video upload request received successfully",
+                "filename": filename,
+                "created_at": task["created_at"]
+            }, 201
+            
+        except Exception as e:
+            return {"error": str(e), "timestamp": datetime.datetime.now().isoformat()}, 500
+
+@videos_ns.route('/list')
+class VideoList(Resource):
+    @videos_ns.doc('list_videos')
+    @videos_ns.marshal_with(video_list_model)
+    @videos_ns.response(500, 'Internal Server Error', error_model)
+    def get(self):
+        """List all videos - returns all video processing tasks"""
+        try:
+            videos = []
+            
+            # Get all videos from Firebase
+            all_tasks = postgres_client.get_all_tasks() if hasattr(postgres_client, 'get_all_tasks') else []
+            pending_tasks = postgres_client.get_pending_tasks() or []
+            
+            # If get_all_tasks is not available, try to get tasks by status
+            if not all_tasks and hasattr(postgres_client, 'db') and postgres_client.db:
+                try:
+                    # Get all documents from video_tasks collection
+                    docs = postgres_client.db.collection('video_tasks').stream()
+                    all_tasks = []
+                    for doc in docs:
+                        task_data = doc.to_dict()
+                        task_data['id'] = doc.id
+                        all_tasks.append(task_data)
+                except Exception as e:
+                    print(f"Error getting all tasks: {e}")
+                    all_tasks = pending_tasks  # Fallback to pending tasks
+            
+            # Convert Firebase tasks to API format
+            for task in all_tasks:
+                videos.append({
+                    "id": task.get("id", "unknown"),
+                    "filename": task.get("filename", "unknown"),
+                    "status": task.get("status", "unknown"),
+                    "created_at": task.get("upload_date", task.get("created_at", "")),
+                    "updated_at": task.get("processing_end", task.get("updated_at", "")),
+                    "size": task.get("size", 0),
+                    "user_id": task.get("user_id", ""),
+                    "user_email": task.get("user_email", ""),
+                    "pdf_url": task.get("pdf_url", "")
+                })
+            
+            return {
+                "videos": videos,
+                "total": len(videos),
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            return {"error": str(e), "timestamp": datetime.datetime.now().isoformat()}, 500
+
+@videos_ns.route('/generate-pdf')
+class GeneratePDF(Resource):
+    @videos_ns.doc('generate_pdf')
+    @videos_ns.response(201, 'Processing Started', video_response_model)
+    @videos_ns.response(400, 'Bad Request', error_model)
+    @videos_ns.response(500, 'Internal Server Error', error_model)
+    def post(self):
+        """Upload video file and start PDF generation - accepts multipart/form-data with video file"""
+        try:
+            # Check if video file was uploaded
+            if 'video' not in request.files:
+                return {"error": "No video file provided", "timestamp": datetime.datetime.now().isoformat()}, 400
+            
+            video_file = request.files['video']
+            if video_file.filename == '':
+                return {"error": "No video file selected", "timestamp": datetime.datetime.now().isoformat()}, 400
+            
+            # Generate unique ID
+            video_id = f"direct-{uuid.uuid4().hex[:8]}"
+            
+            # Save video file to local directory for processing
+            video_path = Path(f"{video_id}.mp4")
+            video_file.save(str(video_path))
+            
+            print(f"📁 Video saved to: {video_path.absolute()}")
+            
+            # Create task record
+            task = {
+                "id": video_id,
+                "filename": video_file.filename,
+                "status": "uploaded",
+                "upload_date": datetime.datetime.now().isoformat(),
+                "created_at": datetime.datetime.now().isoformat(),
+                "updated_at": datetime.datetime.now().isoformat(),
+                "size": video_path.stat().st_size,
+                "user_id": "direct_upload",
+                "user_email": "direct@thakii.dev"
+            }
+            
+            # Save task to Firebase
+            try:
+                postgres_client.create_task(video_id, task)
+                print(f"✅ Task created in Firebase: {video_id}")
+            except Exception as e:
+                print(f"⚠️ Failed to create task in Firebase: {e}")
+            
+            # Start REAL background processing immediately
+            print(f"🚀 Starting REAL processing thread for uploaded video {video_id}")
+            processing_thread = threading.Thread(
+                target=real_video_processing, 
+                args=(video_id, video_path)
+            )
+            processing_thread.daemon = True
+            processing_thread.start()
+            
+            return {
+                "video_id": video_id,
+                "status": "processing",
+                "message": "PDF generation started in background",
+                "filename": video_file.filename,
+                "created_at": task["created_at"]
+            }, 201
+                    
+        except Exception as e:
+            return {"error": str(e), "timestamp": datetime.datetime.now().isoformat()}, 500
 
 @app.route('/list/<user_id>', methods=['GET'])
 def list_videos_by_user(user_id):
@@ -599,27 +744,40 @@ def get_video_status(video_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/', methods=['GET'])
-def api_info():
-    """API information endpoint"""
-    return jsonify({
-        "service": "Thakii Worker Service API",
-        "version": "1.0",
-        "endpoints": {
-            "GET /health": "Service health check",
-            "POST /upload": "Upload video metadata (requires user_id)",
-            "GET /list": "List all uploaded videos",
-            "GET /list/<user_id>": "List videos for specific user",
-            "POST /process/<video_id>": "Process specific video",
-            "GET /status/<video_id>": "Get video processing status",
-            "GET /download/<video_id>.pdf": "Download any PDF (generic)",
-            "GET /download/<user_id>/<video_id>.pdf": "Download PDF for specific user",
-            "POST /generate-pdf": "Upload video file and start PDF generation"
-        },
-        "documentation": "All endpoints work without authentication",
-        "timestamp": datetime.datetime.now().isoformat(),
-        "total_videos": len(tasks_storage)
-    })
+@app.route('/')
+def api_root():
+    """Root endpoint - redirects to Swagger documentation"""
+    from flask import redirect
+    return redirect('/swagger/')
+
+@api.route('/info')
+class APIInfo(Resource):
+    @api.doc('api_info')
+    def get(self):
+        """API information and statistics"""
+        return {
+            "service": "Thakii Worker Service API",
+            "version": "1.0",
+            "description": "Video processing API for converting lectures to PDF transcripts",
+            "swagger_ui": "/swagger/",
+            "endpoints": {
+                "GET /api/v1/health/": "Service health check",
+                "POST /api/v1/videos/upload": "Upload video metadata (requires user_id)",
+                "GET /api/v1/videos/list": "List all uploaded videos",
+                "POST /api/v1/videos/generate-pdf": "Upload video file and start PDF generation",
+                "GET /swagger/": "Interactive API documentation"
+            },
+            "documentation": "All endpoints work without authentication",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "total_videos": len(tasks_storage),
+            "features": [
+                "Real-time video processing",
+                "Whisper AI speech recognition",
+                "PDF transcript generation",
+                "S3 cloud storage integration",
+                "RESTful API with Swagger documentation"
+            ]
+        }
 
 @app.errorhandler(404)
 def not_found(error):
