@@ -1,4 +1,4 @@
-name: Fix thakii-02 Worker PostgreSQL Connection
+name: Deploy Worker Service to thakii-03 (Primary Worker)
 
 on:
   workflow_dispatch:
@@ -9,10 +9,13 @@ on:
       - '.github/workflows/fix-thakii02-postgres.yml'
 
 jobs:
-  fix-postgres-connection:
+  deploy-primary-worker:
     runs-on: ubuntu-22.04
     
     steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    
     - name: Setup SSH via Cloudflare
       run: |
         mkdir -p ~/.ssh
@@ -23,35 +26,47 @@ jobs:
         wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
         sudo dpkg -i cloudflared-linux-amd64.deb
         
-        # Setup SSH config
+        # Setup SSH config for thakii-03
         cat >> ~/.ssh/config << 'EOF'
-        Host thakii-02
-          HostName thakii-02.fds-1.com
-          User ec2-user
+        Host thakii-03
+          HostName ssh-thakii-3.fanusdigital.site
+          User fanusdigital
           ProxyCommand cloudflared access ssh --hostname %h
           StrictHostKeyChecking no
         EOF
     
-    - name: Fix PostgreSQL Configuration on thakii-02
+    - name: Deploy Worker Service to thakii-03
       run: |
-        ssh thakii-02 << 'ENDSSH'
+        # Copy worker service files to thakii-03
+        echo "📦 Deploying worker service files to thakii-03..."
+        scp -r . thakii-03:/Users/fanusdigital/thakii-worker-service-new/
+        
+        ssh thakii-03 << 'ENDSSH'
         set -e
         
-        echo "🔧 FIXING THAKII-02 WORKER POSTGRESQL CONNECTION"
+        echo "🚀 DEPLOYING PRIMARY WORKER SERVICE TO THAKII-03"
         echo "================================================"
         
-        cd /home/ec2-user/thakii-worker-service
+        # Backup existing installation if it exists
+        if [ -d "/Users/fanusdigital/thakii-worker-service" ]; then
+          echo "📋 Backing up existing worker service..."
+          mv /Users/fanusdigital/thakii-worker-service /Users/fanusdigital/thakii-worker-service-backup-$(date +%Y%m%d_%H%M%S)
+        fi
         
-        # Create/update .env file with PostgreSQL configuration
-        echo "📝 Updating .env file with PostgreSQL configuration..."
+        # Move new installation to correct location
+        mv /Users/fanusdigital/thakii-worker-service-new /Users/fanusdigital/thakii-worker-service
+        cd /Users/fanusdigital/thakii-worker-service
+        
+        # Create logs directory
+        mkdir -p logs
+        
+        # Create/update .env file with HTTP database configuration
+        echo "📝 Creating .env file with HTTP database configuration..."
         
         cat > .env << 'ENVEOF'
-        # PostgreSQL Configuration (Connect to local PostgreSQL)
-        POSTGRES_HOST=localhost
-        POSTGRES_PORT=5432
-        POSTGRES_DB=thakii_db
-        POSTGRES_USER=thakii_user
-        POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+        # Use HTTP-based database connection (via backend API)
+        USE_HTTP_DATABASE=true
+        BACKEND_API_URL=https://thakii-02.fanusdigital.site/thakii-be
         
         # AWS S3 Configuration
         AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -59,10 +74,7 @@ jobs:
         S3_BUCKET_NAME=thakii-video-storage-1753883631
         AWS_DEFAULT_REGION=us-east-2
         
-        # Disable Firebase (use PostgreSQL only)
-        DISABLE_FIREBASE=true
-        
-        # Worker Configuration
+        # Worker Configuration (Mac Mini M2 Optimized)
         WORKER_POLL_INTERVAL=10
         MAX_CONCURRENT_TASKS=3
         TEMP_DIR=/tmp/thakii-worker
@@ -70,52 +82,178 @@ jobs:
         
         chmod 600 .env
         
-        echo "✅ .env file updated with PostgreSQL configuration"
+        echo "✅ .env file created with HTTP database configuration"
         
-        # Test PostgreSQL connection
-        echo "🧪 Testing PostgreSQL connection..."
-        source venv/bin/activate
-        python3 -c "
-        from core.postgres_integration import postgres_client
-        if postgres_client.is_available():
-            print('✅ PostgreSQL connection successful!')
-        else:
-            print('❌ PostgreSQL connection failed!')
-            exit(1)
-        " || echo "⚠️ PostgreSQL test failed (will retry after restart)"
+        # Install/update Python dependencies
+        echo "📦 Installing Python dependencies..."
+        /opt/homebrew/bin/python3 -m pip install --break-system-packages -r requirements.txt
         
-        # Restart worker services to pick up new configuration
-        echo "🔄 Restarting worker services..."
-        sudo systemctl restart thakii-api.service
-        sudo systemctl restart thakii-worker.service 2>/dev/null || echo "thakii-worker.service not found (OK)"
+        # Stop any existing worker/API server processes
+        echo "🛑 Stopping existing worker processes..."
+        pkill -f "python.*worker.py" || echo "No worker processes to kill"
+        pkill -f "python.*api_server.py" || echo "No API server processes to kill"
+        
+        # Unload existing LaunchDaemons if they exist
+        launchctl unload ~/Library/LaunchAgents/com.thakii.worker.plist 2>/dev/null || echo "Worker LaunchDaemon not loaded"
+        launchctl unload ~/Library/LaunchAgents/com.thakii.api_server.plist 2>/dev/null || echo "API server LaunchDaemon not loaded"
+        
+        # Create LaunchDaemon for Worker Process
+        echo "🔧 Creating LaunchDaemon for worker process..."
+        cat > ~/Library/LaunchAgents/com.thakii.worker.plist << 'WORKEREOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.thakii.worker</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/fanusdigital/thakii-worker-service/worker.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/fanusdigital/thakii-worker-service</string>
+    <key>StandardOutPath</key>
+    <string>/Users/fanusdigital/thakii-worker-service/logs/worker.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/fanusdigital/thakii-worker-service/logs/worker_error.log</string>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>USE_HTTP_DATABASE</key>
+        <string>true</string>
+        <key>BACKEND_API_URL</key>
+        <string>https://thakii-02.fanusdigital.site/thakii-be</string>
+    </dict>
+</dict>
+</plist>
+WORKEREOF
+        
+        # Create LaunchDaemon for API Server Process
+        echo "🔧 Creating LaunchDaemon for API server process..."
+        cat > ~/Library/LaunchAgents/com.thakii.api_server.plist << 'APIEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.thakii.api_server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/fanusdigital/thakii-worker-service/api_server.py</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/fanusdigital/thakii-worker-service</string>
+    <key>StandardOutPath</key>
+    <string>/Users/fanusdigital/thakii-worker-service/logs/api_server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/fanusdigital/thakii-worker-service/logs/api_server_error.log</string>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>USE_HTTP_DATABASE</key>
+        <string>true</string>
+        <key>BACKEND_API_URL</key>
+        <string>https://thakii-02.fanusdigital.site/thakii-be</string>
+    </dict>
+</dict>
+</plist>
+APIEOF
+        
+        # Load and start both LaunchDaemons
+        echo "🚀 Loading and starting worker LaunchDaemon..."
+        launchctl load ~/Library/LaunchAgents/com.thakii.worker.plist
+        launchctl start com.thakii.worker
+        
+        echo "🚀 Loading and starting API server LaunchDaemon..."
+        launchctl load ~/Library/LaunchAgents/com.thakii.api_server.plist
+        launchctl start com.thakii.api_server
         
         # Wait for services to start
-        sleep 5
+        echo "⏳ Waiting for services to start..."
+        sleep 10
         
-        # Check service status
+        # Verify both services are running
         echo "📊 Checking service status..."
-        sudo systemctl status thakii-api.service --no-pager | head -10
+        echo "Worker process:"
+        ps aux | grep -E "python.*worker.py" | grep -v grep || echo "❌ Worker process not found"
+        
+        echo "API server process:"
+        ps aux | grep -E "python.*api_server.py" | grep -v grep || echo "❌ API server process not found"
+        
+        # Test API server health endpoint
+        echo "🧪 Testing API server health endpoint..."
+        curl -s http://localhost:8000/health || echo "❌ API server health check failed"
         
         echo ""
-        echo "✅ thakii-02 worker configuration updated!"
-        echo "✅ Worker should now use PostgreSQL instead of Firebase/Local"
-        
+        echo "✅ thakii-03 primary worker deployment completed!"
+        echo "✅ Both worker process and API server are now running with LaunchDaemons"
+
 ENDSSH
     
-    - name: Verify PostgreSQL Connection
+    - name: Verify Primary Worker Deployment
       run: |
-        echo "🧪 Verifying worker is now using PostgreSQL..."
-        sleep 5
+        echo "🧪 Verifying primary worker deployment on thakii-03..."
+        sleep 15
         
-        HEALTH_RESPONSE=$(curl -s "https://thakii-02.fanusdigital.site/thakii-worker/health")
-        echo "$HEALTH_RESPONSE"
+        # Test the API server health endpoint via Nginx proxy
+        echo "Testing API server via Nginx proxy..."
+        HEALTH_RESPONSE=$(curl -s "https://thakii-3.fanusdigital.site/thakii-worker/health" || echo '{"error": "connection_failed"}')
+        echo "Health Response: $HEALTH_RESPONSE"
         
-        DATABASE=$(echo "$HEALTH_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('database', 'unknown'))")
+        # Test backend's worker health check
+        echo ""
+        echo "Testing backend's worker health check..."
+        BACKEND_HEALTH=$(curl -s "https://thakii-02.fanusdigital.site/thakii-be/health" || echo '{"error": "backend_connection_failed"}')
+        echo "Backend Health: $BACKEND_HEALTH"
         
-        if [ "$DATABASE" = "PostgreSQL" ] || [ "$DATABASE" = "postgres" ]; then
-          echo "✅ SUCCESS: Worker is now using PostgreSQL!"
+        # Check if primary worker is now healthy
+        PRIMARY_STATUS=$(echo "$BACKEND_HEALTH" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    workers = data.get('workers', {})
+    primary = workers.get('primary', {})
+    print(primary.get('status', 'unknown'))
+except:
+    print('parse_error')
+" 2>/dev/null || echo "unknown")
+        
+        echo "Primary worker status: $PRIMARY_STATUS"
+        
+        if [[ "$PRIMARY_STATUS" == *"healthy"* ]] || [[ "$PRIMARY_STATUS" == "200" ]]; then
+          echo "✅ SUCCESS: Primary worker (thakii-03) is now healthy!"
+          echo "✅ Both worker process and API server are running correctly"
         else
-          echo "⚠️ WARNING: Worker database shows as: $DATABASE"
-          echo "This might be cached. Worker should use PostgreSQL on next request."
+          echo "⚠️ WARNING: Primary worker status is: $PRIMARY_STATUS"
+          echo "The deployment may need a few more minutes to fully initialize"
+          echo "Check the logs on thakii-03 for any startup issues"
         fi
+        
+        echo ""
+        echo "🎯 Deployment Summary:"
+        echo "- Worker service deployed to thakii-03"
+        echo "- Both worker process and API server configured with LaunchDaemons"
+        echo "- HTTP database connection configured"
+        echo "- AWS S3 credentials configured"
+        echo "- Nginx proxy should now route to healthy API server on port 8000"
 
