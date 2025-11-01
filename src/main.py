@@ -62,16 +62,10 @@ class CommandLineArgRunner:
                 model_name = "base"
                 print(f"📥 Loading Whisper {model_name} model...")
                 
-                # Detect Mac Mini M2 GPU (MPS) for optimal performance
-                if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                    device = "mps"
-                    print("🍎 Using Apple Metal Performance Shaders (Mac Mini M2 GPU)")
-                elif torch.cuda.is_available():
-                    device = "cuda"
-                    print("🚀 Using CUDA GPU")
-                else:
-                    device = "cpu"
-                    print("💻 Using CPU")
+                # Force CPU for Whisper to avoid MPS compatibility issues
+                # MPS has issues with float64 operations in Whisper word timestamps
+                device = "cpu"
+                print("💻 Using CPU (avoiding MPS compatibility issues)")
                 
                 # Load base model - MUST succeed or fail (no fallback)
                 model = whisper.load_model(model_name, device=device)
@@ -91,7 +85,7 @@ class CommandLineArgRunner:
                     suppress_tokens=[-1],
                     initial_prompt="This is a lecture or educational video with clear speech.",
                     condition_on_previous_text=True,
-                    word_timestamps=True,
+                    word_timestamps=False,  # Disabled to avoid MPS float64 issues
                     prepend_punctuations="\"'([{-",
                     append_punctuations="\"'.,!?:)]}",
                     compression_ratio_threshold=2.4,
