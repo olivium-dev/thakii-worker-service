@@ -68,17 +68,17 @@ jobs:
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       run: |
         # Create .env file locally
-        cat > .env << EOF
-USE_HTTP_DATABASE=true
-BACKEND_API_URL=https://thakii-02.fanusdigital.site/thakii-be
-AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-S3_BUCKET_NAME=thakii-video-storage-1753883631
-AWS_DEFAULT_REGION=us-east-2
-WORKER_POLL_INTERVAL=10
-MAX_CONCURRENT_TASKS=3
-TEMP_DIR=/tmp/thakii-worker
-EOF
+        cat > .env << 'DOTENV'
+        USE_HTTP_DATABASE=true
+        BACKEND_API_URL=https://thakii-02.fanusdigital.site/thakii-be
+        AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        S3_BUCKET_NAME=thakii-video-storage-1753883631
+        AWS_DEFAULT_REGION=us-east-2
+        WORKER_POLL_INTERVAL=10
+        MAX_CONCURRENT_TASKS=3
+        TEMP_DIR=/tmp/thakii-worker
+        DOTENV
         
         # Start Cloudflare tunnel
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2201 &
@@ -124,68 +124,43 @@ EOF
         
         echo "✅ Dependencies installed"
         
-        # Create LaunchDaemon plists
+        # Create LaunchDaemon plists (using printf to avoid heredoc issues)
         echo "🔧 Creating LaunchDaemon for worker..."
-        cat > ~/Library/LaunchAgents/com.thakii.worker.plist << 'WORKEREOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.thakii.worker</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/opt/homebrew/bin/python3</string>
-        <string>/Users/fanusdigital/thakii-worker-service/worker.py</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>/Users/fanusdigital/thakii-worker-service</string>
-    <key>StandardOutPath</key>
-    <string>/Users/fanusdigital/thakii-worker-service/logs/worker.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/fanusdigital/thakii-worker-service/logs/worker_error.log</string>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-</dict>
-</plist>
-WORKEREOF
+        printf '%s\n' \
+          '<?xml version="1.0" encoding="UTF-8"?>' \
+          '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+          '<plist version="1.0"><dict>' \
+          '<key>Label</key><string>com.thakii.worker</string>' \
+          '<key>ProgramArguments</key><array>' \
+          '<string>/opt/homebrew/bin/python3</string>' \
+          '<string>/Users/fanusdigital/thakii-worker-service/worker.py</string>' \
+          '</array>' \
+          '<key>WorkingDirectory</key><string>/Users/fanusdigital/thakii-worker-service</string>' \
+          '<key>StandardOutPath</key><string>/Users/fanusdigital/thakii-worker-service/logs/worker.log</string>' \
+          '<key>StandardErrorPath</key><string>/Users/fanusdigital/thakii-worker-service/logs/worker_error.log</string>' \
+          '<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>' \
+          '<key>RunAtLoad</key><true/>' \
+          '</dict></plist>' \
+          > ~/Library/LaunchAgents/com.thakii.worker.plist
 
         echo "🔧 Creating LaunchDaemon for API server..."
-        cat > ~/Library/LaunchAgents/com.thakii.api_server.plist << 'APIEOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.thakii.api_server</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/opt/homebrew/bin/python3</string>
-        <string>/Users/fanusdigital/thakii-worker-service/api_server.py</string>
-        <string>--port</string>
-        <string>8000</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>/Users/fanusdigital/thakii-worker-service</string>
-    <key>StandardOutPath</key>
-    <string>/Users/fanusdigital/thakii-worker-service/logs/api_server.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/fanusdigital/thakii-worker-service/logs/api_server_error.log</string>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-</dict>
-</plist>
-APIEOF
+        printf '%s\n' \
+          '<?xml version="1.0" encoding="UTF-8"?>' \
+          '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+          '<plist version="1.0"><dict>' \
+          '<key>Label</key><string>com.thakii.api_server</string>' \
+          '<key>ProgramArguments</key><array>' \
+          '<string>/opt/homebrew/bin/python3</string>' \
+          '<string>/Users/fanusdigital/thakii-worker-service/api_server.py</string>' \
+          '<string>--port</string><string>8000</string>' \
+          '</array>' \
+          '<key>WorkingDirectory</key><string>/Users/fanusdigital/thakii-worker-service</string>' \
+          '<key>StandardOutPath</key><string>/Users/fanusdigital/thakii-worker-service/logs/api_server.log</string>' \
+          '<key>StandardErrorPath</key><string>/Users/fanusdigital/thakii-worker-service/logs/api_server_error.log</string>' \
+          '<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>' \
+          '<key>RunAtLoad</key><true/>' \
+          '</dict></plist>' \
+          > ~/Library/LaunchAgents/com.thakii.api_server.plist
         
         # Unload existing services
         echo "🛑 Stopping existing services..."
@@ -219,7 +194,7 @@ APIEOF
         
         echo ""
         echo "✅ Deployment complete via GitHub Actions!"
-ENDSSH
+        ENDSSH
         
         # Cleanup tunnel
         kill $TUNNEL_PID 2>/dev/null || true
