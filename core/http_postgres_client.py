@@ -60,7 +60,7 @@ class HTTPPostgresClient:
             
             # Make API call to backend
             response = requests.post(
-                f"{self.backend_url}/internal/update-task-status",
+                f"{self.backend_url}/internal/task-update",
                 json=update_data,
                 timeout=self.timeout,
                 headers={'Content-Type': 'application/json'}
