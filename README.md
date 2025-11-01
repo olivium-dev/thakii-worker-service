@@ -4,6 +4,8 @@
 
 Transform lecture videos into comprehensive PDF documents with **intelligent subtitle generation**! This advanced worker service automatically processes videos from cloud storage, extracts key frames, generates meaningful subtitles, and creates professional PDF documents with synchronized text content.
 
+**🔧 Latest Update**: AWS credentials integration and deployment pipeline fixes applied.
+
 **✨ Key Features:**
 - 🎤 **Automatic Subtitle Generation** - No subtitle files needed!
 - 🌐 **Local API Server** - HTTP endpoints for easy integration (no authentication required)
