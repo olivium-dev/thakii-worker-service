@@ -83,3 +83,4 @@ Flask-CORS==4.0.0
 openai-whisper==20231117
 torch==2.1.0
 torchaudio==2.1.0
+srt==3.5.3
