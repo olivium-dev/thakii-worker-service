@@ -1,7 +1,7 @@
 from .subtitle_webvtt_parser import SubtitleWebVTTParser
 from .subtitle_srt_parser import SubtitleSRTParser
 from .subtitle_part import SubtitlePart
-import cv2
+# cv2 import removed - not needed after removing SubtitleGenerator
 import os
 from dotenv import load_dotenv
 
