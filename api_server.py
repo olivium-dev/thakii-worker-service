@@ -646,18 +646,26 @@ def internal_error(error):
     }), 500
 
 if __name__ == '__main__':
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='Thakii Worker Service API Server')
+    parser.add_argument('--port', type=int, default=8000, help='Port to run the server on')
+    args = parser.parse_args()
+    
+    port = args.port
+    
     print("🚀 Starting Thakii Worker Service API Server")
     print("=" * 50)
     print("🔓 No authentication required!")
-    print("📡 Server will be available at: http://localhost:9000")
-    print("🏥 Health check: http://localhost:9000/health")
-    print("📖 API info: http://localhost:9000/")
+    print(f"📡 Server will be available at: http://localhost:{port}")
+    print(f"🏥 Health check: http://localhost:{port}/health")
+    print(f"📖 API info: http://localhost:{port}/")
     print("=" * 50)
     
     # Start the server
     app.run(
         host='127.0.0.1',
-        port=9000,
+        port=port,
         debug=False
     )
 
