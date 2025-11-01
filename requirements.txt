@@ -78,3 +78,8 @@ python-dotenv==1.0.0
 # Local API Server Dependencies
 Flask==2.3.3
 Flask-CORS==4.0.0
+
+# Whisper AI for Speech Recognition (REQUIRED - NO FALLBACK)
+openai-whisper==20231117
+torch==2.1.0
+torchaudio==2.1.0

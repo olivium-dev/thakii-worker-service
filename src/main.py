@@ -1,6 +1,6 @@
 import sys
 import argparse
-from .subtitle_segment_finder import SubtitleGenerator, SubtitleSegmentFinder
+from .subtitle_segment_finder import SubtitleSegmentFinder
 from .subtitle_webvtt_parser import SubtitleWebVTTParser
 from .subtitle_srt_parser import SubtitleSRTParser
 from .video_segment_finder import VideoSegmentFinder
@@ -54,103 +54,74 @@ class CommandLineArgRunner:
             )
         else:
             if subtitle_filepath is None:
-                print("🎤 Generating REAL subtitles from actual video audio...")
-                # Generate real subtitles using Whisper transcription
-                try:
-                    print("📦 Checking Whisper dependencies...")
-                    import whisper
-                    import os
-                    import torch
-                    
-                    # Load Whisper base model for better accuracy
-                    model_name = "base"
-                    print(f"📥 Loading Whisper {model_name} model (balanced speed/accuracy)...")
-                    
-                    # Detect best device with fallback
-                    device = "cpu"  # Safe default
-                    try:
-                        if torch.cuda.is_available():
-                            device = "cuda"
-                            print("🚀 Using CUDA GPU acceleration")
-                        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                            device = "mps"
-                            print("🍎 Using Apple Metal Performance Shaders")
-                        else:
-                            print("💻 Using CPU (slower but reliable)")
-                    except Exception as device_error:
-                        print(f"⚠️ Device detection failed, using CPU: {device_error}")
-                        device = "cpu"
-                    
-                    # Load model with error handling
-                    try:
-                        model = whisper.load_model(model_name, device=device)
-                        print(f"✅ Whisper model loaded successfully on {device}")
-                    except Exception as model_error:
-                        print(f"⚠️ Failed to load {model_name} model: {model_error}")
-                        print("🔄 Trying 'tiny' model as fallback...")
-                        model_name = "tiny"
-                        model = whisper.load_model(model_name, device="cpu")
-                        print(f"✅ Fallback model loaded: {model_name} on CPU")
-                    
-                    # Transcribe with robust settings
-                    print("🎵 Transcribing audio with Whisper...")
-                    try:
-                        result = model.transcribe(
-                            video_filepath,
-                            language="en",                           # Specify language
-                            task="transcribe",                       # Explicit task
-                            temperature=0.0,                         # Deterministic
-                            beam_size=5,                            # Search paths
-                            best_of=5,                              # Try multiple times
-                            patience=2.0,                           # Wait for better results
-                            length_penalty=1.0,                     # Natural length
-                            suppress_tokens=[-1],                   # Suppress unwanted
-                            initial_prompt="This is a lecture or educational video with clear speech.",
-                            condition_on_previous_text=True,        # Use context
-                            word_timestamps=True,                   # Word timing
-                            prepend_punctuations="\"'([{-",      # Better punctuation
-                            append_punctuations="\"'.,!?:)]}",  # Better punctuation
-                            compression_ratio_threshold=2.4,        # Quality filter
-                            logprob_threshold=-1.0,                # Confidence filter
-                            no_speech_threshold=0.6,               # Silence detection
-                            fp16=False,                            # Full precision
-                            verbose=False                          # Reduce noise
-                        )
-                        print("✅ Transcription completed successfully")
-                    except Exception as transcribe_error:
-                        print(f"❌ Transcription failed: {transcribe_error}")
-                        raise transcribe_error
-                    
-                    # Save to SRT file
-                    srt_path = video_filepath.rsplit(".", 1)[0] + ".srt"
-                    with open(srt_path, "w", encoding='utf-8') as f:
-                        for i, segment in enumerate(result["segments"]):
-                            start_time = segment["start"]
-                            end_time = segment["end"]
-                            text = segment["text"].strip()
-                            
-                            # Format time for SRT
-                            def format_time(seconds):
-                                h = int(seconds // 3600)
-                                m = int((seconds % 3600) // 60)
-                                s = int(seconds % 60)
-                                ms = int((seconds - int(seconds)) * 1000)
-                                return f"{h:02}:{m:02}:{s:02},{ms:03}"
-                            
-                            f.write(f"{i+1}\n{format_time(start_time)} --> {format_time(end_time)}\n{text}\n\n")
-                    
-                    print(f"✅ Real transcription saved to: {srt_path}")
-                    subtitle_parser = SubtitleSRTParser(srt_path)
-                    
-                except ImportError as e:
-                    print(f"⚠️ Whisper/PyTorch not available: {e}")
-                    print("📦 Missing dependencies. Install with: pip install openai-whisper torch")
-                    print("🔄 Using enhanced subtitle generator as fallback...")
-                    subtitle_parser = SubtitleGenerator(video_filepath)
-                except Exception as e:
-                    print(f"⚠️ Whisper transcription failed: {e}")
-                    print("🔄 Falling back to enhanced subtitle generator...")
-                    subtitle_parser = SubtitleGenerator(video_filepath)
+                print("🎤 Generating subtitles from video audio using Whisper base model...")
+                import whisper
+                import torch
+                
+                # Force Whisper base model - NO FALLBACKS
+                model_name = "base"
+                print(f"📥 Loading Whisper {model_name} model...")
+                
+                # Detect Mac Mini M2 GPU (MPS) for optimal performance
+                if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    device = "mps"
+                    print("🍎 Using Apple Metal Performance Shaders (Mac Mini M2 GPU)")
+                elif torch.cuda.is_available():
+                    device = "cuda"
+                    print("🚀 Using CUDA GPU")
+                else:
+                    device = "cpu"
+                    print("💻 Using CPU")
+                
+                # Load base model - MUST succeed or fail (no fallback)
+                model = whisper.load_model(model_name, device=device)
+                print(f"✅ Whisper {model_name} model loaded on {device}")
+                
+                # Transcribe with optimal settings for Mac Mini M2
+                print("🎵 Transcribing audio...")
+                result = model.transcribe(
+                    video_filepath,
+                    language="en",
+                    task="transcribe",
+                    temperature=0.0,
+                    beam_size=5,
+                    best_of=5,
+                    patience=2.0,
+                    length_penalty=1.0,
+                    suppress_tokens=[-1],
+                    initial_prompt="This is a lecture or educational video with clear speech.",
+                    condition_on_previous_text=True,
+                    word_timestamps=True,
+                    prepend_punctuations="\"'([{-",
+                    append_punctuations="\"'.,!?:)]}",
+                    compression_ratio_threshold=2.4,
+                    logprob_threshold=-1.0,
+                    no_speech_threshold=0.6,
+                    fp16=False,
+                    verbose=False
+                )
+                print("✅ Transcription completed")
+                
+                # Save to SRT file
+                srt_path = video_filepath.rsplit(".", 1)[0] + ".srt"
+                with open(srt_path, "w", encoding='utf-8') as f:
+                    for i, segment in enumerate(result["segments"]):
+                        start_time = segment["start"]
+                        end_time = segment["end"]
+                        text = segment["text"].strip()
+                        
+                        # Format time for SRT
+                        def format_time(seconds):
+                            h = int(seconds // 3600)
+                            m = int((seconds % 3600) // 60)
+                            s = int(seconds % 60)
+                            ms = int((seconds - int(seconds)) * 1000)
+                            return f"{h:02}:{m:02}:{s:02},{ms:03}"
+                        
+                        f.write(f"{i+1}\n{format_time(start_time)} --> {format_time(end_time)}\n{text}\n\n")
+                
+                print(f"✅ Transcription saved to: {srt_path}")
+                subtitle_parser = SubtitleSRTParser(srt_path)
             elif subtitle_filepath.endswith(".srt"):
                 subtitle_parser = SubtitleSRTParser(subtitle_filepath)
             else:

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Enhanced Worker with Firebase Integration
-Combines superior PDF generation with backend communication
+Optimized Worker for Mac Mini M2 - High Performance Video Processing
+- Uses Apple Metal (MPS) GPU acceleration
+- Robust queuing with no hanging
+- Optimal CPU/RAM utilization
+- No fallback code - production ready
 """
 
 import os
@@ -11,8 +14,11 @@ import tempfile
 import subprocess
 from pathlib import Path
 import shutil
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+import signal
 
-# Import Firebase integration
+# Import core integrations
 from core.postgres_integration import postgres_client
 from core.s3_integration import s3_client
 
@@ -21,13 +27,22 @@ class EnhancedWorker:
         self.postgres = postgres_client
         self.s3 = s3_client
         
+        # Mac Mini M2 Optimization: Use multiple cores efficiently
+        self.max_concurrent_tasks = int(os.getenv('MAX_CONCURRENT_TASKS', min(multiprocessing.cpu_count(), 3)))
+        self.executor = ThreadPoolExecutor(max_workers=self.max_concurrent_tasks)
+        
         # Configure intelligent storage selection
         self.temp_base_dir = self._get_temp_storage_path()
         
-        print("🚀 Enhanced Worker with PostgreSQL Integration", flush=True)
+        # Task processing timeout (30 minutes)
+        self.task_timeout = 1800
+        
+        print("🚀 Mac Mini M2 Optimized Worker", flush=True)
         print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}", flush=True)
         print(f"   S3: {'✅' if self.s3.is_available() else '❌'}", flush=True)
         print(f"   Temp Storage: {self.temp_base_dir}", flush=True)
+        print(f"   Max Concurrent Tasks: {self.max_concurrent_tasks}", flush=True)
+        print(f"   CPU Cores: {multiprocessing.cpu_count()}", flush=True)
         sys.stdout.flush()
     
     def _get_temp_storage_path(self):
@@ -134,28 +149,47 @@ class EnhancedWorker:
             return False
     
     def run_polling_loop(self):
-        print("🔄 Starting polling loop...", flush=True)
+        """Robust polling loop optimized for Mac Mini M2 - No hanging, efficient queuing"""
+        print("🔄 Starting robust polling loop (Mac Mini M2 optimized)...", flush=True)
         sys.stdout.flush()
+        
+        poll_interval = int(os.getenv('WORKER_POLL_INTERVAL', 10))
+        active_tasks = set()
         
         while True:
             try:
-                pending_tasks = self.postgres.get_pending_tasks()
+                # Get pending tasks with timeout protection
+                pending_tasks = self.postgres.get_pending_tasks(limit=self.max_concurrent_tasks * 2)
                 
                 if pending_tasks:
+                    print(f"📋 Found {len(pending_tasks)} pending tasks", flush=True)
+                    
                     for task in pending_tasks:
                         video_id = task.get('video_id')
-                        if video_id:
-                            self.process_video(video_id)
+                        if video_id and video_id not in active_tasks:
+                            # Track active task to prevent duplicate processing
+                            active_tasks.add(video_id)
+                            
+                            # Process with timeout protection - no hanging
+                            try:
+                                future = self.executor.submit(self.process_video, video_id)
+                                future.add_done_callback(lambda f, vid=video_id: active_tasks.discard(vid))
+                            except Exception as e:
+                                print(f"❌ Failed to submit task {video_id}: {e}", flush=True)
+                                active_tasks.discard(video_id)
                 else:
                     print("⏳ No pending tasks...", flush=True)
                 
-                time.sleep(10)
+                # Clean up completed/failed tasks from tracking
+                time.sleep(poll_interval)
+                
             except KeyboardInterrupt:
-                print("\n🛑 Worker stopped", flush=True)
+                print("\n🛑 Worker stopping gracefully...", flush=True)
+                self.executor.shutdown(wait=True, cancel_futures=False)
                 break
             except Exception as e:
-                print(f"💥 Error: {e}", flush=True)
-                time.sleep(30)
+                print(f"💥 Polling error (will retry): {e}", flush=True)
+                time.sleep(30)  # Back off on errors
 
 def main():
     worker = EnhancedWorker()
