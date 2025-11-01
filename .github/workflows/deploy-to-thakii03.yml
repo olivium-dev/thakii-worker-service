@@ -2,16 +2,6 @@ name: Deploy Worker Service to thakii-03
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'core/**'
-      - 'src/**'
-      - 'worker.py'
-      - 'api_server.py'
-      - 'requirements.txt'
-      - '.github/workflows/deploy-to-thakii03.yml'
 
 jobs:
   deploy:
