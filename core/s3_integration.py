@@ -91,3 +91,5 @@ class WorkerS3Client:
             return None
 
 s3_client = WorkerS3Client()
+
+# Deployment trigger - 20251101_194853
