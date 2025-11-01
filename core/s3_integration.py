@@ -79,7 +79,8 @@ class WorkerS3Client:
             return None
         
         try:
-            s3_key = f"pdfs/{video_id}.pdf"
+            # Use correct S3 path structure: pdfs/{video_id}/{video_id}.pdf
+            s3_key = f"pdfs/{video_id}/{video_id}.pdf"
             self.s3_client.upload_file(local_pdf_path, self.bucket_name, s3_key)
             
             s3_url = f"https://{self.bucket_name}.s3.{os.getenv('AWS_DEFAULT_REGION', 'us-east-2')}.amazonaws.com/{s3_key}"
