@@ -118,7 +118,7 @@ class HTTPPostgresClient:
         """
         try:
             response = requests.get(
-                f"{self.backend_url}/internal/pending-tasks",
+                f"{self.backend_url}/internal/get-pending-tasks",
                 params={'limit': limit},
                 timeout=self.timeout
             )
