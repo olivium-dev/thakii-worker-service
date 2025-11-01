@@ -1,39 +1,49 @@
 #!/usr/bin/env python3
 """
 PostgreSQL Integration for Worker Service
-Replaces Firestore with PostgreSQL for task management
+Supports both direct PostgreSQL and HTTP-based backend access
 """
 
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from typing import Optional, Dict, Any, List
-import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
 
-class WorkerPostgresClient:
-    def __init__(self):
-        """Initialize PostgreSQL client for worker"""
-        self.conn_params = {
-            'host': os.getenv('POSTGRES_HOST', 'localhost'),
-            'port': os.getenv('POSTGRES_PORT', '5432'),
-            'database': os.getenv('POSTGRES_DB', 'thakii_production'),
-            'user': os.getenv('POSTGRES_USER', 'thakii_user'),
-            'password': os.getenv('POSTGRES_PASSWORD')
-        }
-        self._test_connection()
+# Check if HTTP mode is enabled
+USE_HTTP_MODE = os.getenv('USE_HTTP_DATABASE', 'false').lower() == 'true'
+
+if USE_HTTP_MODE:
+    # Use HTTP-based client for remote workers
+    from .http_postgres_client import HTTPPostgresClient as WorkerPostgresClient
+    print("🌐 Using HTTP-based PostgreSQL client")
+else:
+    # Use direct PostgreSQL connection for local workers
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from typing import Optional, Dict, Any, List
+    import datetime
     
-    def _test_connection(self):
-        """Test PostgreSQL connection"""
-        try:
-            conn = psycopg2.connect(**self.conn_params)
-            conn.close()
-            print("✅ PostgreSQL connection successful")
-        except Exception as e:
-            print(f"❌ PostgreSQL connection failed: {e}")
-            raise
+    class WorkerPostgresClient:
+        def __init__(self):
+            """Initialize PostgreSQL client for worker - Direct connection"""
+            self.conn_params = {
+                'host': os.getenv('POSTGRES_HOST', 'localhost'),
+                'port': os.getenv('POSTGRES_PORT', '5432'),
+                'database': os.getenv('POSTGRES_DB', 'thakii_production'),
+                'user': os.getenv('POSTGRES_USER', 'thakii_user'),
+                'password': os.getenv('POSTGRES_PASSWORD')
+            }
+            self._test_connection()
+        
+        def _test_connection(self):
+            """Test PostgreSQL connection"""
+            try:
+                conn = psycopg2.connect(**self.conn_params)
+                conn.close()
+                print("✅ Direct PostgreSQL connection successful")
+            except Exception as e:
+                print(f"❌ PostgreSQL connection failed: {e}")
+                raise
     
     def is_available(self) -> bool:
         """Check if PostgreSQL is available"""
