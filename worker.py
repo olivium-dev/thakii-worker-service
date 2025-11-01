@@ -170,7 +170,7 @@ def main():
             worker.run_polling_loop()
         elif command == "--health-check":
             print("🏥 Running health check...")
-            print(f"   Firestore: {'✅' if worker.firestore.is_available() else '❌'}")
+            print(f"   Firestore: {'✅' if worker.postgres.is_available() else '❌'}")
             print(f"   S3: {'✅' if worker.s3.is_available() else '❌'}")
             sys.exit(0)
         else:

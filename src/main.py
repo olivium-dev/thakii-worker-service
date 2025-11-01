@@ -57,48 +57,69 @@ class CommandLineArgRunner:
                 print("🎤 Generating REAL subtitles from actual video audio...")
                 # Generate real subtitles using Whisper transcription
                 try:
+                    print("📦 Checking Whisper dependencies...")
                     import whisper
                     import os
                     import torch
                     
-                    # Load Whisper tiny model for maximum speed
-                    model_name = "tiny"
-                    print(f"📥 Loading Whisper {model_name} model (fastest processing, good for large videos)...")
+                    # Load Whisper base model for better accuracy
+                    model_name = "base"
+                    print(f"📥 Loading Whisper {model_name} model (balanced speed/accuracy)...")
                     
-                    # Detect best device
-                    if torch.cuda.is_available():
-                        device = "cuda"
-                    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                        device = "mps"
-                    else:
+                    # Detect best device with fallback
+                    device = "cpu"  # Safe default
+                    try:
+                        if torch.cuda.is_available():
+                            device = "cuda"
+                            print("🚀 Using CUDA GPU acceleration")
+                        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                            device = "mps"
+                            print("🍎 Using Apple Metal Performance Shaders")
+                        else:
+                            print("💻 Using CPU (slower but reliable)")
+                    except Exception as device_error:
+                        print(f"⚠️ Device detection failed, using CPU: {device_error}")
                         device = "cpu"
                     
-                    model = whisper.load_model(model_name, device=device)
-                    print(f"✅ Model loaded on {device}")
+                    # Load model with error handling
+                    try:
+                        model = whisper.load_model(model_name, device=device)
+                        print(f"✅ Whisper model loaded successfully on {device}")
+                    except Exception as model_error:
+                        print(f"⚠️ Failed to load {model_name} model: {model_error}")
+                        print("🔄 Trying 'tiny' model as fallback...")
+                        model_name = "tiny"
+                        model = whisper.load_model(model_name, device="cpu")
+                        print(f"✅ Fallback model loaded: {model_name} on CPU")
                     
-                    # Transcribe with optimized settings for tiny model
-                    print("🎵 Transcribing audio with Whisper tiny model (fastest speed)...")
-                    result = model.transcribe(
-                        video_filepath,
-                        language="en",                           # Specify language
-                        task="transcribe",                       # Explicit task
-                        temperature=0.0,                         # Deterministic (no randomness)
-                        beam_size=5,                            # Search 5 best paths
-                        best_of=5,                              # Try 5 times, pick best
-                        patience=2.0,                           # Wait longer for better results
-                        length_penalty=1.0,                     # Prefer natural length
-                        suppress_tokens=[-1],                   # Suppress unwanted tokens
-                        initial_prompt="This is a lecture or educational video with clear, professional speech. Please transcribe every word accurately.",
-                        condition_on_previous_text=True,        # Use context from previous segments
-                        word_timestamps=True,                   # Word-level timing
-                        prepend_punctuations="\"'([{-",      # Better punctuation
-                        append_punctuations="\"'.,!?:)]}",  # Better punctuation
-                        compression_ratio_threshold=2.4,        # Quality filter
-                        logprob_threshold=-1.0,                # Confidence filter
-                        no_speech_threshold=0.6,               # Silence detection
-                        fp16=False,                            # Full precision
-                        verbose=True                           # Show progress
-                    )
+                    # Transcribe with robust settings
+                    print("🎵 Transcribing audio with Whisper...")
+                    try:
+                        result = model.transcribe(
+                            video_filepath,
+                            language="en",                           # Specify language
+                            task="transcribe",                       # Explicit task
+                            temperature=0.0,                         # Deterministic
+                            beam_size=5,                            # Search paths
+                            best_of=5,                              # Try multiple times
+                            patience=2.0,                           # Wait for better results
+                            length_penalty=1.0,                     # Natural length
+                            suppress_tokens=[-1],                   # Suppress unwanted
+                            initial_prompt="This is a lecture or educational video with clear speech.",
+                            condition_on_previous_text=True,        # Use context
+                            word_timestamps=True,                   # Word timing
+                            prepend_punctuations="\"'([{-",      # Better punctuation
+                            append_punctuations="\"'.,!?:)]}",  # Better punctuation
+                            compression_ratio_threshold=2.4,        # Quality filter
+                            logprob_threshold=-1.0,                # Confidence filter
+                            no_speech_threshold=0.6,               # Silence detection
+                            fp16=False,                            # Full precision
+                            verbose=False                          # Reduce noise
+                        )
+                        print("✅ Transcription completed successfully")
+                    except Exception as transcribe_error:
+                        print(f"❌ Transcription failed: {transcribe_error}")
+                        raise transcribe_error
                     
                     # Save to SRT file
                     srt_path = video_filepath.rsplit(".", 1)[0] + ".srt"
@@ -123,7 +144,8 @@ class CommandLineArgRunner:
                     
                 except ImportError as e:
                     print(f"⚠️ Whisper/PyTorch not available: {e}")
-                    print("🔄 Using enhanced subtitle generator with improved segmentation...")
+                    print("📦 Missing dependencies. Install with: pip install openai-whisper torch")
+                    print("🔄 Using enhanced subtitle generator as fallback...")
                     subtitle_parser = SubtitleGenerator(video_filepath)
                 except Exception as e:
                     print(f"⚠️ Whisper transcription failed: {e}")
