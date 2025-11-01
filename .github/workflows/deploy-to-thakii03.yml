@@ -80,8 +80,7 @@ jobs:
         
         echo ""
         echo "✅ Deployment complete via GitHub Actions!"
-        
-ENDSSH
+        ENDSSH
     
     - name: 🧪 Verify Deployment
       run: |
