@@ -44,9 +44,21 @@ class HTTPPostgresClient:
             bool: True if successful, False otherwise
         """
         try:
+            # Get task details to extract user_id (required by backend)
+            task = self.get_task_details(video_id)
+            if not task:
+                print(f"❌ Cannot update status: task {video_id} not found")
+                return False
+            
+            user_id = task.get('user_id') or task.get('user_email')
+            if not user_id:
+                print(f"❌ Cannot update status: user_id missing for task {video_id}")
+                return False
+            
             # Prepare update data
             update_data = {
                 'video_id': video_id,
+                'user_id': user_id,
                 'status': status,
                 'updated_at': datetime.datetime.now().isoformat(),
                 **kwargs
@@ -89,7 +101,7 @@ class HTTPPostgresClient:
         """
         try:
             response = requests.get(
-                f"{self.backend_url}/internal/task-details/{video_id}",
+                f"{self.backend_url}/internal/get-task/{video_id}",
                 timeout=self.timeout
             )
             
