@@ -80,7 +80,7 @@ class ContentSegmentPdfBuilder:
                 else:
                     print(f"⚠️ No text for page {i+1}: {repr(pages[i].text)}")
 
-            pdf.output(output_filepath, "F")
+            pdf.output(output_filepath)
 
 
 if __name__ == "__main__":
