@@ -106,7 +106,7 @@ class HTTPPostgresClient:
             )
             
             if response.status_code == 200:
-                return response.json()
+                return response.json().get('task')  # Extract task from wrapper
             elif response.status_code == 404:
                 print(f"Task {video_id} not found")
                 return None
