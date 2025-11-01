@@ -67,12 +67,29 @@ jobs:
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       run: |
+        # Create .env file locally
+        cat > .env << EOF
+USE_HTTP_DATABASE=true
+BACKEND_API_URL=https://thakii-02.fanusdigital.site/thakii-be
+AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+S3_BUCKET_NAME=thakii-video-storage-1753883631
+AWS_DEFAULT_REGION=us-east-2
+WORKER_POLL_INTERVAL=10
+MAX_CONCURRENT_TASKS=3
+TEMP_DIR=/tmp/thakii-worker
+EOF
+        
         # Start Cloudflare tunnel
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2201 &
         TUNNEL_PID=$!
         sleep 15
         
-        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2201 fanusdigital@localhost << ENDSSH
+        # Copy .env file to server
+        sshpass -p "$THAKII_PASSWORD" scp -o StrictHostKeyChecking=no -P 2201 .env fanusdigital@localhost:/tmp/worker.env
+        rm .env
+        
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2201 fanusdigital@localhost << 'ENDSSH'
         set -e
         
         cd /Users/fanusdigital/thakii-worker-service
@@ -94,19 +111,9 @@ jobs:
             exit 1
         fi
         
-        # Create .env file with all configurations
-        echo "📝 Creating .env file..."
-        cat > .env << 'ENVEOF'
-USE_HTTP_DATABASE=true
-BACKEND_API_URL=https://thakii-02.fanusdigital.site/thakii-be
-AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-S3_BUCKET_NAME=thakii-video-storage-1753883631
-AWS_DEFAULT_REGION=us-east-2
-WORKER_POLL_INTERVAL=10
-MAX_CONCURRENT_TASKS=3
-TEMP_DIR=/tmp/thakii-worker
-ENVEOF
+        # Move .env file to correct location
+        echo "📝 Installing .env file..."
+        mv /tmp/worker.env .env
         chmod 600 .env
         
         # Install/update dependencies (only required packages)
