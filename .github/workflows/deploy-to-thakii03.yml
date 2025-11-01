@@ -35,9 +35,12 @@ jobs:
       run: |
         echo "🚀 Deploying worker service to thakii-03..."
         
+        # Ensure worker directory exists
+        sshpass -p "$THAKII_PASSWORD" ssh thakii-03 'mkdir -p /Users/fanusdigital/thakii-worker-service/{core,src,logs}'
+        
         # Copy all source files using sshpass
-        sshpass -p "$THAKII_PASSWORD" scp -r core thakii-03:/Users/fanusdigital/thakii-worker-service/
-        sshpass -p "$THAKII_PASSWORD" scp -r src thakii-03:/Users/fanusdigital/thakii-worker-service/
+        sshpass -p "$THAKII_PASSWORD" scp -r core/* thakii-03:/Users/fanusdigital/thakii-worker-service/core/
+        sshpass -p "$THAKII_PASSWORD" scp -r src/* thakii-03:/Users/fanusdigital/thakii-worker-service/src/
         sshpass -p "$THAKII_PASSWORD" scp worker.py thakii-03:/Users/fanusdigital/thakii-worker-service/
         sshpass -p "$THAKII_PASSWORD" scp api_server.py thakii-03:/Users/fanusdigital/thakii-worker-service/
         sshpass -p "$THAKII_PASSWORD" scp requirements.txt thakii-03:/Users/fanusdigital/thakii-worker-service/
@@ -49,7 +52,6 @@ jobs:
         THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
       run: |
         sshpass -p "$THAKII_PASSWORD" ssh thakii-03 << 'ENDSSH'
-        set -e
         
         cd /Users/fanusdigital/thakii-worker-service
         
@@ -58,20 +60,117 @@ jobs:
         
         # Verify files were copied
         echo "📋 Verifying S3 integration fix:"
-        grep -A 2 "s3_key = " core/s3_integration.py | head -5
+        if [ -f "core/s3_integration.py" ]; then
+            grep -A 2 "s3_key = " core/s3_integration.py | head -5
+        else
+            echo "❌ ERROR: core/s3_integration.py not found!"
+            exit 1
+        fi
         
-        # Install/update dependencies
+        # Create .env file with all configurations
+        echo "📝 Creating .env file..."
+        cat > .env << 'ENVEOF'
+USE_HTTP_DATABASE=true
+BACKEND_API_URL=https://thakii-02.fanusdigital.site/thakii-be
+AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+S3_BUCKET_NAME=thakii-video-storage-1753883631
+AWS_DEFAULT_REGION=us-east-2
+WORKER_POLL_INTERVAL=10
+MAX_CONCURRENT_TASKS=3
+TEMP_DIR=/tmp/thakii-worker
+ENVEOF
+        chmod 600 .env
+        
+        # Install/update dependencies (skip old incompatible packages)
         echo "📦 Installing dependencies..."
-        /opt/homebrew/bin/python3 -m pip install --break-system-packages -r requirements.txt || echo "Dependencies already installed"
+        /opt/homebrew/bin/python3 -m pip install --break-system-packages \
+          flask flask-cors boto3 botocore psycopg2-binary python-dotenv requests \
+          openai-whisper torch torchaudio srt opencv-python-headless fpdf2 moviepy || {
+            echo "⚠️ Some dependencies failed to install, continuing..."
+        }
         
-        # Restart services
-        echo "🔄 Restarting worker services..."
-        launchctl stop com.thakii.worker 2>/dev/null || echo "Worker not running"
-        launchctl stop com.thakii.api_server 2>/dev/null || echo "API server not running"
+        # Create LaunchDaemon plists
+        echo "🔧 Creating LaunchDaemon for worker..."
+        cat > ~/Library/LaunchAgents/com.thakii.worker.plist << 'WORKEREOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.thakii.worker</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/fanusdigital/thakii-worker-service/worker.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/fanusdigital/thakii-worker-service</string>
+    <key>StandardOutPath</key>
+    <string>/Users/fanusdigital/thakii-worker-service/logs/worker.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/fanusdigital/thakii-worker-service/logs/worker_error.log</string>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+WORKEREOF
+
+        echo "🔧 Creating LaunchDaemon for API server..."
+        cat > ~/Library/LaunchAgents/com.thakii.api_server.plist << 'APIEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.thakii.api_server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/fanusdigital/thakii-worker-service/api_server.py</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/fanusdigital/thakii-worker-service</string>
+    <key>StandardOutPath</key>
+    <string>/Users/fanusdigital/thakii-worker-service/logs/api_server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/fanusdigital/thakii-worker-service/logs/api_server_error.log</string>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+APIEOF
+        
+        # Unload existing services
+        echo "🛑 Stopping existing services..."
+        launchctl unload ~/Library/LaunchAgents/com.thakii.worker.plist 2>/dev/null || echo "Worker not loaded"
+        launchctl unload ~/Library/LaunchAgents/com.thakii.api_server.plist 2>/dev/null || echo "API server not loaded"
+        
+        # Kill any running processes
+        pkill -f "python.*worker.py" || echo "No worker processes to kill"
+        pkill -f "python.*api_server.py" || echo "No API server processes to kill"
         
         sleep 5
         
+        # Load and start services
+        echo "🚀 Starting worker service..."
+        launchctl load ~/Library/LaunchAgents/com.thakii.worker.plist
         launchctl start com.thakii.worker
+        
+        echo "🚀 Starting API server..."
+        launchctl load ~/Library/LaunchAgents/com.thakii.api_server.plist
         launchctl start com.thakii.api_server
         
         # Wait for services to start
@@ -80,6 +179,9 @@ jobs:
         # Verify services are running
         echo "📊 Verifying services are running:"
         ps aux | grep -E "python.*worker.py|python.*api_server.py" | grep -v grep || echo "⚠️ Services starting..."
+        
+        # Check if API server is listening on port 8000
+        lsof -i :8000 || echo "⚠️ API server not listening on port 8000 yet"
         
         echo ""
         echo "✅ Deployment complete via GitHub Actions!"
