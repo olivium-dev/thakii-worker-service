@@ -660,3 +660,90 @@ if __name__ == '__main__':
         port=9000,
         debug=False
     )
+
+@app.route('/deploy', methods=['POST'])
+def deploy_webhook():
+    """Deployment webhook - triggers git pull and service restart"""
+    try:
+        import subprocess
+        import os
+        from pathlib import Path
+        
+        print("🚀 Deployment webhook triggered")
+        
+        # Get current directory (should be worker service directory)
+        current_dir = Path.cwd()
+        print(f"📁 Working directory: {current_dir}")
+        
+        # Pull latest changes
+        print("📥 Pulling latest changes from GitHub...")
+        result = subprocess.run(['git', 'pull', 'origin', 'main'], 
+                              capture_output=True, text=True, cwd=current_dir)
+        
+        if result.returncode == 0:
+            print(f"✅ Git pull successful: {result.stdout}")
+            
+            # Kill existing worker processes
+            print("🔄 Stopping existing worker processes...")
+            subprocess.run(['pkill', '-f', 'python.*worker'], check=False)
+            
+            # Wait a moment
+            import time
+            time.sleep(2)
+            
+            # Start worker service in background
+            print("🚀 Starting worker service...")
+            subprocess.Popen(['python3', 'worker.py', '--process-all'], 
+                           cwd=current_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            return {
+                "status": "success", 
+                "message": "Deployment completed successfully",
+                "git_output": result.stdout,
+                "timestamp": time.time()
+            }
+        else:
+            print(f"❌ Git pull failed: {result.stderr}")
+            return {
+                "status": "error", 
+                "message": f"Git pull failed: {result.stderr}"
+            }, 500
+            
+    except Exception as e:
+        print(f"💥 Deployment error: {e}")
+        return {
+            "status": "error", 
+            "message": f"Deployment failed: {str(e)}"
+        }, 500
+
+@app.route('/status', methods=['GET'])
+def deployment_status():
+    """Check deployment and service status"""
+    try:
+        import subprocess
+        import os
+        from pathlib import Path
+        
+        current_dir = Path.cwd()
+        
+        # Get git status
+        git_result = subprocess.run(['git', 'rev-parse', 'HEAD'], 
+                                  capture_output=True, text=True, cwd=current_dir)
+        
+        # Check if worker is running
+        worker_check = subprocess.run(['pgrep', '-f', 'python.*worker'], 
+                                    capture_output=True, text=True)
+        
+        return {
+            "git_commit": git_result.stdout.strip() if git_result.returncode == 0 else "unknown",
+            "worker_running": worker_check.returncode == 0,
+            "worker_processes": len(worker_check.stdout.strip().split('\n')) if worker_check.stdout.strip() else 0,
+            "directory": str(current_dir),
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }, 500
