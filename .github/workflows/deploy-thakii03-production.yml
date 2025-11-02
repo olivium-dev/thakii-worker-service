@@ -55,10 +55,13 @@ jobs:
         # Ensure worker directory exists
         sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2200 fanusdigital@localhost 'mkdir -p /Users/fanusdigital/thakii-worker-service/{core,src,logs}'
         
-        # Copy tarball to server
+        # Copy tarball to server and verify
         sshpass -p "$THAKII_PASSWORD" scp -o StrictHostKeyChecking=no -P 2200 worker-service.tar.gz fanusdigital@localhost:/tmp/
         
-        echo "✅ Files copied to server"
+        # Verify file was copied successfully
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2200 fanusdigital@localhost 'ls -lh /tmp/worker-service.tar.gz'
+        
+        echo "✅ Files copied and verified on server"
         
         # Cleanup tunnel
         kill $TUNNEL_PID 2>/dev/null || true
