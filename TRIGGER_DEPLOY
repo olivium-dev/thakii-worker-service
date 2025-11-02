@@ -1,2 +1,2 @@
 # Modify this file to trigger a deployment to thakii-03
-Deployment trigger: 2025-11-02 03:00:00 - Fix Swagger UI path prefix for production
+Deployment trigger: 2025-11-02 03:05:00 - Add flask-restx dependency for Swagger UI
