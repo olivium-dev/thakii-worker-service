@@ -42,7 +42,10 @@ jobs:
         echo "🚀 Deploying worker service to thakii-03 via GitHub Actions..."
         
         # Create tarball of worker service files
-        tar czf worker-service.tar.gz core src worker.py api_server.py requirements.txt
+        echo "📦 Creating tarball with files:"
+        ls -la core src worker.py api_server.py requirements.txt fonts/ 2>/dev/null || echo "Some files missing"
+        tar czf worker-service.tar.gz core src worker.py api_server.py requirements.txt fonts/
+        echo "✅ Tarball created: $(ls -lh worker-service.tar.gz)"
         
         # Start Cloudflare tunnel in background
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2200 &
@@ -100,7 +103,10 @@ jobs:
         
         # Extract files
         echo "📦 Extracting worker service files..."
+        echo "📋 Checking tarball:"
+        ls -lh /tmp/worker-service.tar.gz || echo "❌ Tarball not found!"
         tar xzf /tmp/worker-service.tar.gz
+        echo "✅ Files extracted successfully"
         rm /tmp/worker-service.tar.gz
         
         # Verify files were copied
