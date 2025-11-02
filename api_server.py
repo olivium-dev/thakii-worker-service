@@ -39,16 +39,37 @@ class PrefixMiddleware(object):
         self.prefix = prefix
 
     def __call__(self, environ, start_response):
-        if environ['PATH_INFO'].startswith(self.prefix):
+        # Print the incoming PATH_INFO for debugging
+        print(f"🔍 Incoming request: {environ['PATH_INFO']}")
+        
+        if self.prefix and environ['PATH_INFO'].startswith(self.prefix):
+            print(f"✅ Path matches prefix: {self.prefix}")
+            # Remove the prefix from PATH_INFO
             environ['PATH_INFO'] = environ['PATH_INFO'][len(self.prefix):]
+            # Set SCRIPT_NAME to the prefix
             environ['SCRIPT_NAME'] = self.prefix
+            print(f"🔀 Modified PATH_INFO: {environ['PATH_INFO']}")
+            return self.app(environ, start_response)
+        elif not self.prefix:
+            # No prefix defined, just pass through
+            print(f"⏩ No prefix defined, passing through")
             return self.app(environ, start_response)
         else:
+            print(f"❌ Path does not match prefix: {self.prefix}")
             start_response('404', [('Content-Type', 'text/plain')])
             return [b'This url does not belong to the app.']
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+# Apply PATH_PREFIX if defined
+path_prefix = os.getenv('PATH_PREFIX', '')
+if path_prefix:
+    print(f"🔗 Applying path prefix at initialization: {path_prefix}")
+    app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=path_prefix)
+    print(f"✅ PrefixMiddleware applied with prefix: {path_prefix}")
+else:
+    print("⚠️ No PATH_PREFIX defined, API will be served at root path")
 
 # Check if we're running behind a reverse proxy with path prefix
 path_prefix = os.getenv('PATH_PREFIX', '')
@@ -930,6 +951,8 @@ if __name__ == '__main__':
     print(f"🏥 Health check: http://localhost:{port}/health")
     print(f"📖 API info: http://localhost:{port}/")
     print("=" * 50)
+    
+    # PATH_PREFIX is already applied at app initialization
     
     # Start the server
     app.run(
