@@ -150,6 +150,7 @@ jobs:
           '<key>StandardErrorPath</key><string>/Users/fanusdigital/thakii-worker-service/logs/worker_error.log</string>' \
           '<key>EnvironmentVariables</key><dict>' \
           '<key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>' \
+          '<key>PATH_PREFIX</key><string>/thakii-worker</string>' \
           '</dict>' \
           '<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>' \
           '<key>RunAtLoad</key><true/>' \
@@ -170,6 +171,10 @@ jobs:
           '<key>WorkingDirectory</key><string>/Users/fanusdigital/thakii-worker-service</string>' \
           '<key>StandardOutPath</key><string>/Users/fanusdigital/thakii-worker-service/logs/api_server.log</string>' \
           '<key>StandardErrorPath</key><string>/Users/fanusdigital/thakii-worker-service/logs/api_server_error.log</string>' \
+          '<key>EnvironmentVariables</key><dict>' \
+          '<key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>' \
+          '<key>PATH_PREFIX</key><string>/thakii-worker</string>' \
+          '</dict>' \
           '<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>' \
           '<key>RunAtLoad</key><true/>' \
           '</dict></plist>' \
