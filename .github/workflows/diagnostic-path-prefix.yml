@@ -1,0 +1,37 @@
+name: Diagnostic - Check PATH_PREFIX on thakii-03
+on: workflow_dispatch
+jobs:
+  diagnose:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Check thakii-03 Configuration
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        curl -L -o cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+        
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2201 &
+        sleep 15
+        
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2201 fanusdigital@localhost << 'ENDSSH'
+        echo "=== Running Process ==="
+        ps aux | grep api_server.py | grep -v grep
+        
+        echo -e "\n=== Process Environment ==="
+        PID=$(ps aux | grep "[a]pi_server.py" | awk '{print $2}')
+        if [ ! -z "$PID" ]; then
+          ps eww $PID | tr ' ' '\n' | grep -i path_prefix || echo "No PATH_PREFIX in process env"
+        fi
+        
+        echo -e "\n=== Service Log (Last 30 lines) ==="
+        tail -30 /Users/fanusdigital/thakii-worker-service/logs/api_server.log
+        
+        echo -e "\n=== LaunchAgent Plist ==="
+        cat ~/Library/LaunchAgents/com.thakii.api_server.plist | grep -A 3 "PATH_PREFIX"
+        
+        echo -e "\n=== .env File ==="
+        cat /Users/fanusdigital/thakii-worker-service/.env | grep PATH_PREFIX
+ENDSSH
+
