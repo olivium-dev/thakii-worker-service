@@ -1,40 +1,38 @@
 #!/usr/bin/env python3
 """
-Test script to process test-small.mp4 using direct method
+Direct test of video processing without Redis or Worker
 """
 
 import os
 import sys
 import uuid
-import tempfile
-import shutil
 from pathlib import Path
 from dotenv import load_dotenv
-
-# Fix for macOS fork() issue with objc
-os.environ['OBJC_DISABLE_INITIALIZE_FORK_SAFETY'] = 'YES'
 
 load_dotenv()
 
 def main():
-    """Process test-small.mp4 file directly"""
-    # Check for test-small.mp4 file
-    test_video = "test-small.mp4"
+    """Process a local test video file directly using src.main"""
+    # Check for test video file
+    test_video = "tests/videos/input_1.mp4"
     if not os.path.exists(test_video):
         print(f"❌ Test video not found: {test_video}")
-        print("Please place test-small.mp4 in the current directory")
         return False
     
     # Generate a unique video ID
-    video_id = f"test-small-{uuid.uuid4().hex[:8]}"
+    video_id = f"test-{uuid.uuid4().hex[:8]}"
+    filename = os.path.basename(test_video)
     
-    print(f"🎬 Processing test video: {test_video}")
+    print(f"🎬 Processing local test video: {test_video}")
     print(f"🆔 Video ID: {video_id}")
     
     # Create a temporary directory and copy the test video
+    import tempfile
+    import shutil
+    
     with tempfile.TemporaryDirectory() as temp_dir:
         # Copy the test video to the temp directory
-        temp_video = os.path.join(temp_dir, "test-small.mp4")
+        temp_video = os.path.join(temp_dir, filename)
         shutil.copy(test_video, temp_video)
         
         print(f"📁 Copied test video to: {temp_video}")
