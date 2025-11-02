@@ -52,8 +52,12 @@ CORS(app)  # Enable CORS for all routes
 
 # Check if we're running behind a reverse proxy with path prefix
 path_prefix = os.getenv('PATH_PREFIX', '')
+print(f"🔧 PATH_PREFIX environment variable: '{path_prefix}'", flush=True)
 if path_prefix:
+    print(f"✅ Applying WSGI middleware with prefix: {path_prefix}", flush=True)
     app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=path_prefix)
+else:
+    print("⚠️ No PATH_PREFIX set - API will be accessible without prefix", flush=True)
 
 api = Api(
     app,
