@@ -1,2 +1,2 @@
 # Modify this file to trigger a deployment to thakii-03
-Deployment trigger: 2025-11-02 03:25:00 - Add PATH_PREFIX to LaunchDaemon environment
+Deployment trigger: 2025-11-02 03:30:00 - Fixed CI/CD pipeline and deploy Swagger UI fix
