@@ -1,0 +1,153 @@
+name: Fix PATH_PREFIX on thakii-03
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Fix PATH_PREFIX Environment Loading
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        echo "🔧 Installing dependencies..."
+        curl -L -o cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+        
+        echo "🌐 Starting Cloudflare tunnel..."
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2201 &
+        TUNNEL_PID=$!
+        sleep 15
+        
+        echo "🔍 Diagnosing and fixing PATH_PREFIX issue on thakii-03..."
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2201 fanusdigital@localhost << 'ENDSSH'
+        set -e
+        
+        cd /Users/fanusdigital/thakii-worker-service
+        
+        echo "=== CURRENT STATE DIAGNOSIS ==="
+        echo "1. Checking running processes:"
+        ps aux | grep -E "api_server.py|worker.py" | grep -v grep || echo "No processes running"
+        
+        echo ""
+        echo "2. Checking current .env file:"
+        cat .env | grep PATH_PREFIX || echo "PATH_PREFIX not in .env"
+        
+        echo ""
+        echo "3. Checking LaunchAgent plist:"
+        grep -A 2 "PATH_PREFIX" ~/Library/LaunchAgents/com.thakii.api_server.plist || echo "PATH_PREFIX not in plist"
+        
+        echo ""
+        echo "4. Checking recent service logs:"
+        tail -20 logs/api_server.log | grep -i "path_prefix\|prefix" || echo "No PATH_PREFIX messages in logs"
+        
+        echo ""
+        echo "=== APPLYING FIX ==="
+        
+        # Ensure .env file has PATH_PREFIX
+        echo "📝 Ensuring .env has PATH_PREFIX..."
+        if ! grep -q "^PATH_PREFIX=" .env; then
+          echo "PATH_PREFIX=/thakii-worker" >> .env
+          echo "✅ Added PATH_PREFIX to .env"
+        else
+          echo "✅ PATH_PREFIX already in .env"
+        fi
+        
+        # Backup logs before restart
+        echo "💾 Backing up logs..."
+        cp logs/api_server.log logs/api_server.log.backup 2>/dev/null || true
+        
+        # Stop services completely
+        echo "🛑 Stopping all services..."
+        launchctl unload ~/Library/LaunchAgents/com.thakii.api_server.plist 2>/dev/null || echo "API server not loaded"
+        launchctl unload ~/Library/LaunchAgents/com.thakii.worker.plist 2>/dev/null || echo "Worker not loaded"
+        launchctl unload ~/Library/LaunchAgents/com.thakii.rq_worker.plist 2>/dev/null || echo "RQ worker not loaded"
+        
+        # Kill any remaining processes
+        pkill -f "api_server.py" || echo "No api_server processes to kill"
+        pkill -f "worker.py" || echo "No worker processes to kill"
+        pkill -f "rq_worker.py" || echo "No rq_worker processes to kill"
+        
+        sleep 3
+        
+        # Verify processes are stopped
+        echo "✅ All processes stopped"
+        ps aux | grep -E "api_server.py|worker.py|rq_worker.py" | grep -v grep || echo "Confirmed: No processes running"
+        
+        # Clear old logs to see fresh startup
+        echo "🗑️ Clearing old logs for fresh start..."
+        > logs/api_server.log
+        > logs/api_server_error.log
+        > logs/worker.log
+        > logs/worker_error.log
+        
+        # Start services with fresh environment
+        echo "🚀 Starting services with environment loading..."
+        launchctl load ~/Library/LaunchAgents/com.thakii.api_server.plist
+        launchctl start com.thakii.api_server
+        
+        launchctl load ~/Library/LaunchAgents/com.thakii.worker.plist
+        launchctl start com.thakii.worker
+        
+        launchctl load ~/Library/LaunchAgents/com.thakii.rq_worker.plist 2>/dev/null || true
+        launchctl start com.thakii.rq_worker 2>/dev/null || echo "⚠️ RQ worker not started (expected if Redis disabled)"
+        
+        # Wait for services to initialize
+        echo "⏳ Waiting for services to initialize..."
+        sleep 10
+        
+        echo ""
+        echo "=== VERIFICATION ==="
+        
+        echo "1. Checking processes are running:"
+        ps aux | grep -E "api_server.py|worker.py" | grep -v grep
+        
+        echo ""
+        echo "2. Checking API server logs for PATH_PREFIX:"
+        tail -30 logs/api_server.log
+        
+        echo ""
+        echo "3. Checking if API server is listening on port 8000:"
+        lsof -i :8000 || echo "⚠️ Port 8000 not listening yet"
+        
+        echo ""
+        echo "4. Testing local endpoint (without prefix):"
+        curl -s http://localhost:8000/health | head -5 || echo "Local health check failed"
+        
+        echo ""
+        echo "5. Testing local endpoint (with prefix):"
+        curl -s http://localhost:8000/thakii-worker/health | head -5 || echo "Prefix health check failed"
+        
+        echo ""
+        echo "✅ Fix applied - services restarted with environment"
+        ENDSSH
+        
+        # Cleanup tunnel
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+        
+        echo ""
+        echo "=== EXTERNAL VERIFICATION ==="
+        echo "Waiting for services to be fully ready..."
+        sleep 15
+        
+        echo "Testing public endpoint (with prefix):"
+        HEALTH_RESPONSE=$(curl -s "https://thakii-3.fanusdigital.site/thakii-worker/health" || echo '{"error": "connection_failed"}')
+        echo "Response: $HEALTH_RESPONSE"
+        
+        if echo "$HEALTH_RESPONSE" | grep -q '"status"'; then
+          echo "✅ SUCCESS: Primary worker responding correctly with PATH_PREFIX!"
+        else
+          echo "⚠️ WARNING: Still seeing issues, check logs above"
+        fi
+        
+        echo ""
+        echo "Testing backend worker status:"
+        BACKEND_HEALTH=$(curl -s "https://thakii-02.fanusdigital.site/thakii-be/health")
+        echo "$BACKEND_HEALTH" | jq '.workers.primary' || echo "$BACKEND_HEALTH"
+        
+        echo ""
+        echo "🎉 Fix workflow complete!"
+
