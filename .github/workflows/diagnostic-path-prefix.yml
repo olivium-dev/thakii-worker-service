@@ -1,5 +1,8 @@
 name: Diagnostic - Check PATH_PREFIX on thakii-03
-on: workflow_dispatch
+
+on:
+  workflow_dispatch:
+
 jobs:
   diagnose:
     runs-on: ubuntu-22.04

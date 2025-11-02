@@ -15,23 +15,28 @@ load_dotenv()
 # Import existing worker
 from worker import EnhancedWorker
 
-def process_video_job(video_id: str, s3_key: str, filename: str):
+def process_video_job(video_id: str, user_id: str, filename: str, s3_key: str):
     """
     RQ job function - uses existing EnhancedWorker
-    No modifications to worker.py needed
+    Matches the signature used by HybridQueueManager.enqueue_video()
     """
-    print(f"🎬 RQ Worker processing: {video_id}")
-    worker = EnhancedWorker()
-    success = worker.process_video(
-        video_id=video_id,
-        s3_key=s3_key,
-        filename=filename
-    )
-    
-    if not success:
-        raise Exception(f"Video processing failed: {video_id}")
-    
-    return {"video_id": video_id, "status": "completed"}
+    print(f"🎬 RQ Worker processing: {video_id} for user: {user_id}")
+    try:
+        worker = EnhancedWorker()
+        success = worker.process_video(
+            video_id=video_id,
+            s3_key=s3_key,
+            filename=filename
+        )
+        
+        if not success:
+            raise Exception(f"Video processing failed: {video_id}")
+        
+        print(f"✅ RQ Worker completed: {video_id}")
+        return {"video_id": video_id, "status": "completed"}
+    except Exception as e:
+        print(f"❌ RQ Worker error for {video_id}: {e}")
+        raise
 
 if __name__ == '__main__':
     redis_host = os.getenv('REDIS_HOST', 'localhost')
