@@ -36,49 +36,42 @@ except ImportError as e:
 class PrefixMiddleware(object):
     def __init__(self, app, prefix=''):
         self.app = app
-        self.prefix = prefix
+        self.prefix = prefix.rstrip('/')  # Remove trailing slash
 
     def __call__(self, environ, start_response):
-        # Print the incoming PATH_INFO for debugging
-        print(f"🔍 Incoming request: {environ['PATH_INFO']}")
+        path_info = environ['PATH_INFO']
         
-        if self.prefix and environ['PATH_INFO'].startswith(self.prefix):
-            print(f"✅ Path matches prefix: {self.prefix}")
-            # Remove the prefix from PATH_INFO
-            environ['PATH_INFO'] = environ['PATH_INFO'][len(self.prefix):]
-            # Set SCRIPT_NAME to the prefix
-            environ['SCRIPT_NAME'] = self.prefix
-            print(f"🔀 Modified PATH_INFO: {environ['PATH_INFO']}")
-            return self.app(environ, start_response)
-        elif not self.prefix:
-            # No prefix defined, just pass through
-            print(f"⏩ No prefix defined, passing through")
-            return self.app(environ, start_response)
+        if self.prefix:
+            # Check if the path starts with our prefix
+            if path_info.startswith(self.prefix):
+                # Remove the prefix from PATH_INFO
+                new_path = path_info[len(self.prefix):]
+                # Ensure it starts with /
+                if not new_path.startswith('/'):
+                    new_path = '/' + new_path
+                environ['PATH_INFO'] = new_path
+                environ['SCRIPT_NAME'] = self.prefix
+                return self.app(environ, start_response)
+            else:
+                # Path doesn't match prefix, return 404
+                start_response('404 Not Found', [('Content-Type', 'text/plain')])
+                return [b'This url does not belong to the app.']
         else:
-            print(f"❌ Path does not match prefix: {self.prefix}")
-            start_response('404', [('Content-Type', 'text/plain')])
-            return [b'This url does not belong to the app.']
+            # No prefix, pass through
+            return self.app(environ, start_response)
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Apply PATH_PREFIX if defined
 path_prefix = os.getenv('PATH_PREFIX', '')
+print(f"🔧 PATH_PREFIX environment variable: '{path_prefix}'", flush=True)
 if path_prefix:
-    print(f"🔗 Applying path prefix at initialization: {path_prefix}")
+    print(f"🔗 Applying path prefix middleware: {path_prefix}")
     app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=path_prefix)
     print(f"✅ PrefixMiddleware applied with prefix: {path_prefix}")
 else:
     print("⚠️ No PATH_PREFIX defined, API will be served at root path")
-
-# Check if we're running behind a reverse proxy with path prefix
-path_prefix = os.getenv('PATH_PREFIX', '')
-print(f"🔧 PATH_PREFIX environment variable: '{path_prefix}'", flush=True)
-if path_prefix:
-    print(f"✅ Applying WSGI middleware with prefix: {path_prefix}", flush=True)
-    app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=path_prefix)
-else:
-    print("⚠️ No PATH_PREFIX set - API will be accessible without prefix", flush=True)
 
 api = Api(
     app,
@@ -952,7 +945,7 @@ if __name__ == '__main__':
     print(f"📖 API info: http://localhost:{port}/")
     print("=" * 50)
     
-    # PATH_PREFIX is already applied at app initialization
+    # PATH_PREFIX middleware is already applied at app initialization
     
     # Start the server
     app.run(
