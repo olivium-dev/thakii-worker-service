@@ -86,3 +86,7 @@ torch==2.1.0
 torchaudio==2.1.0
 srt==3.5.3
 opencv-python-headless==4.12.0.88
+
+# Redis Queue for Video Processing
+redis==5.0.1
+rq==1.15.1

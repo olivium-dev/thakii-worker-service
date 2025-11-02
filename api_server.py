@@ -72,6 +72,9 @@ api = Api(
 from core.postgres_integration import postgres_client
 print("✅ Firebase integration loaded - Local storage disabled")
 
+# Import Queue Manager for Redis integration
+from core.queue_manager import queue_manager
+
 # Local task storage for API server (fallback when Firebase unavailable)
 tasks_storage = {}
 
@@ -141,6 +144,7 @@ health_model = api.model('Health', {
     'api_version': fields.String(description='API version'),
     'database': fields.String(description='Database status'),
     'storage': fields.String(description='Storage status'),
+    'redis_queue': fields.String(description='Redis queue status (disabled/available/unavailable)'),
     'endpoints': fields.Raw(description='Available endpoints')
 })
 
@@ -294,6 +298,10 @@ class HealthCheck(Resource):
     @health_ns.marshal_with(health_model)
     def get(self):
         """Health check endpoint - returns service status and available endpoints"""
+        redis_status = "disabled"
+        if queue_manager.enabled:
+            redis_status = "available" if queue_manager.is_available() else "unavailable"
+        
         return {
             "database": "Local",
             "service": "Thakii Lecture2PDF Service",
@@ -301,6 +309,7 @@ class HealthCheck(Resource):
             "storage": "Local",
             "timestamp": datetime.datetime.now().isoformat(),
             "api_version": "1.0",
+            "redis_queue": redis_status,
             "endpoints": {
                 "upload": "/api/v1/videos/upload",
                 "list": "/api/v1/videos/list", 
@@ -648,43 +657,37 @@ def process_video_from_s3():
         
         print(f"📤 Processing S3 video: {video_id} for user: {user_id}")
         
-        # Update task status to processing
-        try:
-            postgres_client.update_task_status(video_id, "processing")
-            print(f"✅ Task status updated to processing: {video_id}")
-        except Exception as e:
-            print(f"⚠️ Failed to update task status: {e}")
-        
-        # Start background processing
-        def background_s3_processing():
+        # Check if Redis queue is enabled
+        if queue_manager.is_available():
             try:
-                print(f"🎬 Starting REAL enhanced processing for video {video_id}")
-                print(f"   🔑 S3 Key: {s3_key}")
-                print(f"   📁 Filename: {filename}")
-                
-                # Use REAL enhanced worker logic instead of mock
-                from worker import EnhancedWorker
-                worker = EnhancedWorker()
-                success = worker.process_video(video_id, s3_key=s3_key, filename=filename)
-                
-                if success:
-                    print(f"✅ REAL enhanced processing completed: {video_id}")
-                else:
-                    print(f"❌ REAL processing failed: {video_id}")
-                    
+                job_id = queue_manager.enqueue_video(
+                    video_id=video_id,
+                    s3_key=s3_key,
+                    filename=filename,
+                    user_id=user_id
+                )
+                return jsonify({
+                    "video_id": video_id,
+                    "status": "in_queue",
+                    "message": "Video enqueued for processing",
+                    "job_id": job_id
+                }), 202
             except Exception as e:
-                print(f"❌ Real processing failed: {e}")
-                postgres_client.update_task_status(video_id, "failed", error=str(e))
-        
-        import threading
-        thread = threading.Thread(target=background_s3_processing)
-        thread.start()
-        
-        return jsonify({
-            "video_id": video_id,
-            "status": "processing",
-            "message": "Video processing started from S3"
-        }), 201
+                return jsonify({"error": f"Failed to enqueue: {str(e)}"}), 500
+        else:
+            # Legacy: Update database, let polling worker handle it
+            print(f"📋 Redis disabled - {video_id} will be processed via polling")
+            try:
+                postgres_client.update_task_status(video_id, "in_queue")
+                print(f"✅ Task status updated to in_queue: {video_id}")
+            except Exception as e:
+                print(f"⚠️ Failed to update task status: {e}")
+            
+            return jsonify({
+                "video_id": video_id,
+                "status": "in_queue",
+                "message": "Video queued for processing (database polling)"
+            }), 202
 
     except Exception as e:
         print(f"❌ S3 processing error: {e}")
