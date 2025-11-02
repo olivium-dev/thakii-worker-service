@@ -17,6 +17,10 @@ from flask_cors import CORS
 import tempfile
 import subprocess
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
