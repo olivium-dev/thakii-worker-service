@@ -33,31 +33,16 @@ except ImportError as e:
     print(f"⚠️ Warning: Could not import src.main - {e}")
     main_runner = None
 
-class PrefixMiddleware(object):
-    def __init__(self, app, prefix=''):
-        self.app = app
-        self.prefix = prefix
-
-    def __call__(self, environ, start_response):
-        if environ['PATH_INFO'].startswith(self.prefix):
-            environ['PATH_INFO'] = environ['PATH_INFO'][len(self.prefix):]
-            environ['SCRIPT_NAME'] = self.prefix
-            return self.app(environ, start_response)
-        else:
-            start_response('404', [('Content-Type', 'text/plain')])
-            return [b'This url does not belong to the app.']
+# PrefixMiddleware removed - Nginx already handles path prefix stripping
+# This was causing conflicts with Nginx's prefix handling
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Check if we're running behind a reverse proxy with path prefix
+# PATH_PREFIX environment variable is still used for documentation purposes
 path_prefix = os.getenv('PATH_PREFIX', '')
 print(f"🔧 PATH_PREFIX environment variable: '{path_prefix}'", flush=True)
-if path_prefix:
-    print(f"✅ Applying WSGI middleware with prefix: {path_prefix}", flush=True)
-    app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=path_prefix)
-else:
-    print("⚠️ No PATH_PREFIX set - API will be accessible without prefix", flush=True)
+print("ℹ️ Nginx handles path prefix stripping - no middleware needed", flush=True)
 
 api = Api(
     app,
