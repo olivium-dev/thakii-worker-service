@@ -66,24 +66,41 @@ video_upload_model = api.model('VideoUpload', {
 
 video_response_model = api.model('VideoResponse', {
     'video_id': fields.String(description='Unique video identifier'),
-    'status': fields.String(description='Processing status'),
+    'status': fields.String(description='Processing status', enum=['uploaded', 'processing', 'completed', 'failed']),
     'filename': fields.String(description='Original filename'),
     'created_at': fields.String(description='Upload timestamp'),
     'message': fields.String(description='Response message')
 })
 
+video_status_model = api.model('VideoStatus', {
+    'video_id': fields.String(description='Unique video identifier'),
+    'status': fields.String(description='Processing status', enum=['uploaded', 'processing', 'completed', 'failed']),
+    'filename': fields.String(description='Original filename'),
+    'created_at': fields.String(description='Creation timestamp'),
+    'updated_at': fields.String(description='Last update timestamp'),
+    'size': fields.Integer(description='File size in bytes'),
+    'user_id': fields.String(description='User ID'),
+    'user_email': fields.String(description='User email'),
+    'pdf_ready': fields.Boolean(description='Whether PDF is ready for download'),
+    'pdf_url': fields.String(description='PDF download URL (if ready)'),
+    'download_url': fields.String(description='Direct download URL (if ready)'),
+    'error': fields.String(description='Error message (if failed)')
+})
+
+video_detail_model = api.model('Video', {
+    'id': fields.String(description='Video ID'),
+    'filename': fields.String(description='Filename'),
+    'status': fields.String(description='Processing status', enum=['uploaded', 'processing', 'completed', 'failed']),
+    'created_at': fields.String(description='Creation date'),
+    'updated_at': fields.String(description='Last update'),
+    'size': fields.Integer(description='File size in bytes'),
+    'user_id': fields.String(description='User ID'),
+    'user_email': fields.String(description='User email'),
+    'pdf_url': fields.String(description='PDF download URL')
+})
+
 video_list_model = api.model('VideoList', {
-    'videos': fields.List(fields.Nested(api.model('Video', {
-        'id': fields.String(description='Video ID'),
-        'filename': fields.String(description='Filename'),
-        'status': fields.String(description='Processing status'),
-        'created_at': fields.String(description='Creation date'),
-        'updated_at': fields.String(description='Last update'),
-        'size': fields.Integer(description='File size'),
-        'user_id': fields.String(description='User ID'),
-        'user_email': fields.String(description='User email'),
-        'pdf_url': fields.String(description='PDF download URL')
-    }))),
+    'videos': fields.List(fields.Nested(video_detail_model)),
     'total': fields.Integer(description='Total number of videos'),
     'timestamp': fields.String(description='Response timestamp')
 })
@@ -96,6 +113,21 @@ health_model = api.model('Health', {
     'database': fields.String(description='Database status'),
     'storage': fields.String(description='Storage status'),
     'endpoints': fields.Raw(description='Available endpoints')
+})
+
+# File upload parser for multipart/form-data
+from werkzeug.datastructures import FileStorage
+upload_parser = api.parser()
+upload_parser.add_argument('video', location='files', type=FileStorage, required=True, help='Video file to process')
+
+# Processing response model for generate-pdf endpoint
+processing_response_model = api.model('ProcessingResponse', {
+    'video_id': fields.String(description='Unique video identifier'),
+    'status': fields.String(description='Processing status', enum=['processing']),
+    'message': fields.String(description='Processing message'),
+    'filename': fields.String(description='Original filename'),
+    'created_at': fields.String(description='Upload timestamp'),
+    'size': fields.Integer(description='File size in bytes')
 })
 
 error_model = api.model('Error', {
