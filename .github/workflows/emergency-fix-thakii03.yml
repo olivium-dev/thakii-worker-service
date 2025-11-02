@@ -1,0 +1,159 @@
+name: Emergency Fix - Nginx and Service on thakii-03
+
+on:
+  workflow_dispatch:
+
+jobs:
+  emergency_fix:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Emergency Diagnosis and Fix
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        echo "🚨 EMERGENCY FIX FOR THAKII-03"
+        
+        curl -L -o cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+        
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2201 &
+        TUNNEL_PID=$!
+        sleep 15
+        
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2201 fanusdigital@localhost << 'ENDSSH'
+        set -e
+        
+        echo "=== PHASE 1: DIAGNOSIS ==="
+        echo "1. Checking what's running:"
+        ps aux | grep -E "Python|python|api_server|worker" | grep -v grep || echo "No Python processes"
+        
+        echo ""
+        echo "2. Checking port 8000:"
+        lsof -i :8000 || echo "Nothing listening on port 8000"
+        
+        echo ""
+        echo "3. Checking nginx status:"
+        sudo nginx -t 2>&1 || echo "Nginx config test failed"
+        
+        echo ""
+        echo "4. Checking nginx upstream config:"
+        sudo cat /usr/local/etc/nginx/nginx.conf | grep -A 10 "location /thakii-worker" || echo "No thakii-worker location block"
+        
+        echo ""
+        echo "5. Checking LaunchAgents:"
+        launchctl list | grep thakii || echo "No thakii services loaded"
+        
+        echo ""
+        echo "=== PHASE 2: AGGRESSIVE CLEANUP ==="
+        echo "Killing ALL Python processes..."
+        sudo pkill -9 -f "Python.*api_server" || echo "No api_server to kill"
+        sudo pkill -9 -f "Python.*worker.py" || echo "No worker to kill"
+        sudo pkill -9 -f "python.*api_server" || echo "No python api_server to kill"
+        sudo pkill -9 -f "python.*worker.py" || echo "No python worker to kill"
+        
+        echo ""
+        echo "Unloading ALL LaunchAgents..."
+        launchctl unload ~/Library/LaunchAgents/com.thakii.* 2>/dev/null || echo "LaunchAgents unloaded"
+        
+        sleep 3
+        
+        echo ""
+        echo "Verifying cleanup:"
+        ps aux | grep -E "[Pp]ython.*[aw]" | grep -v grep || echo "✅ All Python processes killed"
+        
+        echo ""
+        echo "=== PHASE 3: ENVIRONMENT SETUP ==="
+        cd /Users/fanusdigital/thakii-worker-service
+        
+        echo "Current directory: $(pwd)"
+        echo ""
+        echo "Checking .env file:"
+        cat .env | head -15
+        
+        echo ""
+        echo "=== PHASE 4: START SERVICES WITH PYTHON 3.13 ==="
+        echo "Starting API server directly (Python 3.13)..."
+        
+        # Start API server with explicit environment
+        export PATH_PREFIX=/thakii-worker
+        export USE_HTTP_DATABASE=true
+        export BACKEND_API_URL=https://thakii-02.fanusdigital.site/thakii-be
+        
+        # Use Python 3.13 from Homebrew
+        nohup /opt/homebrew/bin/python3 api_server.py --port 8000 > logs/api_server.log 2> logs/api_server_error.log &
+        API_PID=$!
+        echo "API server started with PID: $API_PID"
+        
+        sleep 5
+        
+        echo ""
+        echo "Starting worker directly (Python 3.13)..."
+        nohup /opt/homebrew/bin/python3 worker.py > logs/worker.log 2> logs/worker_error.log &
+        WORKER_PID=$!
+        echo "Worker started with PID: $WORKER_PID"
+        
+        sleep 5
+        
+        echo ""
+        echo "=== PHASE 5: VERIFICATION ==="
+        echo "1. Checking processes:"
+        ps aux | grep -E "api_server|worker.py" | grep -v grep
+        
+        echo ""
+        echo "2. Checking port 8000:"
+        lsof -i :8000
+        
+        echo ""
+        echo "3. Checking API server startup logs:"
+        tail -20 logs/api_server.log
+        
+        echo ""
+        echo "4. Checking for errors:"
+        tail -10 logs/api_server_error.log 2>/dev/null || echo "No errors logged"
+        
+        echo ""
+        echo "5. Testing local endpoint (no prefix):"
+        curl -s http://localhost:8000/health 2>&1 | head -10 || echo "Failed"
+        
+        echo ""
+        echo "6. Testing local endpoint (with prefix):"
+        curl -s http://localhost:8000/thakii-worker/health 2>&1 | head -10 || echo "Failed"
+        
+        echo ""
+        echo "=== PHASE 6: NGINX CHECK ==="
+        echo "Checking nginx configuration:"
+        sudo cat /usr/local/etc/nginx/nginx.conf | grep -B 5 -A 15 "location /thakii-worker"
+        
+        echo ""
+        echo "Reloading nginx:"
+        sudo nginx -s reload 2>&1 || echo "Nginx reload failed"
+        
+        echo ""
+        echo "✅ Manual fix complete - services running directly with nohup"
+        echo "⚠️  NOTE: Services are NOT managed by LaunchAgent anymore"
+        echo "💡 If this works, we need to fix the LaunchAgent configuration"
+        ENDSSH
+        
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+        
+        echo ""
+        echo "=== EXTERNAL TEST ==="
+        sleep 10
+        
+        echo "Testing public endpoint:"
+        RESPONSE=$(curl -s "https://thakii-3.fanusdigital.site/thakii-worker/health" 2>&1)
+        echo "Response: $RESPONSE"
+        
+        if echo "$RESPONSE" | grep -q '"status"'; then
+          echo "🎉 SUCCESS! Primary worker is now responding!"
+        else
+          echo "⚠️  Still seeing issues. Response was: $RESPONSE"
+          echo "This might be an nginx configuration issue"
+        fi
+        
+        echo ""
+        echo "Checking backend view:"
+        curl -s "https://thakii-02.fanusdigital.site/thakii-be/health" | jq '.workers.primary'
+
