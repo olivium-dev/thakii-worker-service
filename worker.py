@@ -80,8 +80,8 @@ class EnhancedWorker:
             print(f"   📁 Filename: {filename}")
         
         try:
-            # Update to processing
-            self.postgres.update_task_status(video_id, "processing")
+            # Update to processing with 0% progress
+            self.postgres.update_task_status(video_id, "processing", progress_percentage=0.0)
             
             # Get task details
             task = self.postgres.get_task_details(video_id)
@@ -102,15 +102,24 @@ class EnhancedWorker:
                 print(f"   📁 Using temp directory: {temp_dir}", flush=True)
                 sys.stdout.flush()
                 
+                # Update progress to 10% - Starting download
+                self.postgres.update_task_status(video_id, "processing", progress_percentage=10.0)
+                
                 # Download video (use exact s3_key if available)
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
                     self.postgres.update_task_status(video_id, "failed", error_message="Download failed")
                     return False
                 
+                # Update progress to 30% - Download complete, starting PDF generation
+                self.postgres.update_task_status(video_id, "processing", progress_percentage=30.0)
+                
                 # Generate PDF with superior algorithms
                 if not self._generate_superior_pdf(video_path, pdf_path):
                     self.postgres.update_task_status(video_id, "failed", error_message="PDF generation failed")
                     return False
+                
+                # Update progress to 80% - PDF generated, starting upload
+                self.postgres.update_task_status(video_id, "processing", progress_percentage=80.0)
                 
                 # Upload PDF
                 pdf_url = self.s3.upload_pdf(str(pdf_path), video_id)
@@ -118,8 +127,8 @@ class EnhancedWorker:
                     self.postgres.update_task_status(video_id, "failed", error_message="Upload failed")
                     return False
                 
-                # Mark completed
-                self.postgres.update_task_status(video_id, "done", pdf_url=pdf_url)
+                # Mark completed with 100% progress
+                self.postgres.update_task_status(video_id, "done", pdf_url=pdf_url, progress_percentage=100.0)
                 print(f"🎉 Success: {video_id}")
                 return True
                 

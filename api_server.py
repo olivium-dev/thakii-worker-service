@@ -95,7 +95,8 @@ video_response_model = api.model('VideoResponse', {
     'status': fields.String(description='Processing status', enum=['uploaded', 'processing', 'completed', 'failed']),
     'filename': fields.String(description='Original filename'),
     'created_at': fields.String(description='Upload timestamp'),
-    'message': fields.String(description='Response message')
+    'message': fields.String(description='Response message'),
+    'progress_percentage': fields.Float(description='Processing progress percentage (0-100)')
 })
 
 video_status_model = api.model('VideoStatus', {
@@ -110,7 +111,8 @@ video_status_model = api.model('VideoStatus', {
     'pdf_ready': fields.Boolean(description='Whether PDF is ready for download'),
     'pdf_url': fields.String(description='PDF download URL (if ready)'),
     'download_url': fields.String(description='Direct download URL (if ready)'),
-    'error': fields.String(description='Error message (if failed)')
+    'error': fields.String(description='Error message (if failed)'),
+    'progress_percentage': fields.Float(description='Processing progress percentage (0-100)')
 })
 
 video_detail_model = api.model('Video', {
@@ -122,7 +124,8 @@ video_detail_model = api.model('Video', {
     'size': fields.Integer(description='File size in bytes'),
     'user_id': fields.String(description='User ID'),
     'user_email': fields.String(description='User email'),
-    'pdf_url': fields.String(description='PDF download URL')
+    'pdf_url': fields.String(description='PDF download URL'),
+    'progress_percentage': fields.Float(description='Processing progress percentage (0-100)')
 })
 
 video_list_model = api.model('VideoList', {
@@ -153,7 +156,8 @@ processing_response_model = api.model('ProcessingResponse', {
     'message': fields.String(description='Processing message'),
     'filename': fields.String(description='Original filename'),
     'created_at': fields.String(description='Upload timestamp'),
-    'size': fields.Integer(description='File size in bytes')
+    'size': fields.Integer(description='File size in bytes'),
+    'progress_percentage': fields.Float(description='Processing progress percentage (0-100)')
 })
 
 error_model = api.model('Error', {
@@ -189,13 +193,19 @@ def real_video_processing(video_id, video_path):
     output_pdf = None
     try:
         print(f"🎬 Starting REAL processing for video {video_id}")
-        # Update status in Firebase
+        # Update status in Firebase with 0% progress
         try:
-            postgres_client.update_task_status(video_id, "processing")
+            postgres_client.update_task_status(video_id, "processing", progress_percentage=0.0)
             print(f"✅ Updated Firebase status to processing: {video_id}")
         except Exception as e:
             print(f"⚠️ Failed to update Firebase status: {e}")
         
+        # Update progress to 10% - Starting processing
+        try:
+            postgres_client.update_task_status(video_id, "processing", progress_percentage=10.0)
+        except Exception as e:
+            print(f"⚠️ Failed to update progress: {e}")
+            
         # Method 1: Try to use imported main runner
         if main_runner:
             print(f"📚 Using imported CommandLineArgRunner")
@@ -203,9 +213,21 @@ def real_video_processing(video_id, video_path):
             output_pdf = f"{video_id}.pdf"
             args = [str(video_path), "-o", output_pdf]
             
+            # Update progress to 20% - Starting subtitle generation
+            try:
+                postgres_client.update_task_status(video_id, "processing", progress_percentage=20.0)
+            except Exception as e:
+                print(f"⚠️ Failed to update progress: {e}")
+                
             # Parse and run
             print(f"🔧 Args: {args}")
             main_runner.run(args)
+            
+            # Update progress to 80% - PDF generation completed
+            try:
+                postgres_client.update_task_status(video_id, "processing", progress_percentage=80.0)
+            except Exception as e:
+                print(f"⚠️ Failed to update progress: {e}")
             
             pdf_path = Path(output_pdf)
             if not pdf_path.exists():
@@ -214,10 +236,23 @@ def real_video_processing(video_id, video_path):
             # Method 2: Direct subprocess call to src/main.py
             print(f"🔧 Using subprocess call to src/main.py")
             output_pdf = f"{video_id}.pdf"
+            
+            # Update progress to 20% - Starting subtitle generation
+            try:
+                postgres_client.update_task_status(video_id, "processing", progress_percentage=20.0)
+            except Exception as e:
+                print(f"⚠️ Failed to update progress: {e}")
+                
             result = subprocess.run([
                 sys.executable, '-m', 'src.main', str(video_path), '-o', output_pdf
             ], capture_output=True, text=True, cwd=os.path.dirname(__file__))
             
+            # Update progress to 80% - PDF generation completed
+            try:
+                postgres_client.update_task_status(video_id, "processing", progress_percentage=80.0)
+            except Exception as e:
+                print(f"⚠️ Failed to update progress: {e}")
+                
             if result.returncode != 0:
                 raise Exception(f"Main process failed: {result.stderr}")
             
@@ -226,10 +261,15 @@ def real_video_processing(video_id, video_path):
             if not pdf_path.exists():
                 raise Exception("PDF was not generated by main process")
         
-        # Update status to completed
-        # Update status in Firebase
+        # Update progress to 90% - Finalizing
         try:
-            postgres_client.update_task_status(video_id, "completed", pdf_url=f"local://{pdf_path}")
+            postgres_client.update_task_status(video_id, "processing", progress_percentage=90.0)
+        except Exception as e:
+            print(f"⚠️ Failed to update progress: {e}")
+            
+        # Update status to completed with 100% progress
+        try:
+            postgres_client.update_task_status(video_id, "completed", pdf_url=f"local://{pdf_path}", progress_percentage=100.0)
             print(f"✅ Updated Firebase status to completed: {video_id}")
         except Exception as e:
             print(f"⚠️ Failed to update Firebase status: {e}")
@@ -337,7 +377,8 @@ class VideoUpload(Resource):
                 "status": "uploaded",
                 "message": "Video upload request received successfully",
                 "filename": filename,
-                "created_at": task["created_at"]
+                "created_at": task["created_at"],
+                "progress_percentage": 0.0
             }, 201
             
         except Exception as e:
@@ -373,6 +414,11 @@ class VideoList(Resource):
             
             # Convert Firebase tasks to API format
             for task in all_tasks:
+                progress = task.get("progress_percentage", 0.0)
+                # Set progress to 100% if completed
+                if task.get("status") == "completed":
+                    progress = 100.0
+                    
                 videos.append({
                     "id": task.get("id", "unknown"),
                     "filename": task.get("filename", "unknown"),
@@ -382,7 +428,8 @@ class VideoList(Resource):
                     "size": task.get("size", 0),
                     "user_id": task.get("user_id", ""),
                     "user_email": task.get("user_email", ""),
-                    "pdf_url": task.get("pdf_url", "")
+                    "pdf_url": task.get("pdf_url", ""),
+                    "progress_percentage": progress
                 })
             
             return {
@@ -454,7 +501,8 @@ class GeneratePDF(Resource):
                 "status": "processing",
                 "message": "PDF generation started in background",
                 "filename": video_file.filename,
-                "created_at": task["created_at"]
+                "created_at": task["created_at"],
+                "progress_percentage": 0.0
             }, 201
                     
         except Exception as e:
@@ -782,7 +830,8 @@ def get_video_status(video_id):
             "updated_at": task.get("processing_end", task.get("updated_at")),
             "size": task.get("size", 0),
             "user_id": task.get("user_id", ""),
-            "user_email": task.get("user_email", "")
+            "user_email": task.get("user_email", ""),
+            "progress_percentage": task.get("progress_percentage", 0.0)
         }
         
         # Add error details if processing failed
@@ -794,6 +843,7 @@ def get_video_status(video_id):
             status_response["pdf_url"] = task["pdf_url"]
             status_response["pdf_ready"] = True
             status_response["download_url"] = f"/download/{video_id}.pdf"
+            status_response["progress_percentage"] = 100.0
         else:
             status_response["pdf_ready"] = False
         
