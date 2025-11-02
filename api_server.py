@@ -22,6 +22,17 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Debug: Print environment variables
+print(f"🔍 Debug - Current working directory: {os.getcwd()}")
+print(f"🔍 Debug - PATH_PREFIX from env: '{os.getenv('PATH_PREFIX', 'NOT_SET')}'")
+print(f"🔍 Debug - .env file exists: {os.path.exists('.env')}")
+if os.path.exists('.env'):
+    with open('.env', 'r') as f:
+        env_content = f.read()
+        print(f"🔍 Debug - .env content preview: {env_content[:200]}...")
+else:
+    print("🔍 Debug - No .env file found, checking environment variables directly")
+
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
@@ -36,28 +47,46 @@ except ImportError as e:
 class PrefixMiddleware(object):
     def __init__(self, app, prefix=''):
         self.app = app
-        self.prefix = prefix
+        self.prefix = prefix.rstrip('/')  # Remove trailing slash
 
     def __call__(self, environ, start_response):
-        if environ['PATH_INFO'].startswith(self.prefix):
-            environ['PATH_INFO'] = environ['PATH_INFO'][len(self.prefix):]
-            environ['SCRIPT_NAME'] = self.prefix
-            return self.app(environ, start_response)
+        path_info = environ['PATH_INFO']
+        print(f"🔍 Middleware Debug - Incoming path: {path_info}, Prefix: {self.prefix}")
+        
+        if self.prefix:
+            # Check if the path starts with our prefix
+            if path_info.startswith(self.prefix):
+                # Remove the prefix from PATH_INFO
+                new_path = path_info[len(self.prefix):]
+                # Ensure it starts with /
+                if not new_path.startswith('/'):
+                    new_path = '/' + new_path
+                environ['PATH_INFO'] = new_path
+                environ['SCRIPT_NAME'] = self.prefix
+                print(f"🔍 Middleware Debug - Path matched, new path: {new_path}")
+                return self.app(environ, start_response)
+            else:
+                # Path doesn't match prefix, return 404
+                print(f"🔍 Middleware Debug - Path doesn't match prefix, returning 404")
+                start_response('404 Not Found', [('Content-Type', 'text/plain')])
+                return [b'This url does not belong to the app.']
         else:
-            start_response('404', [('Content-Type', 'text/plain')])
-            return [b'This url does not belong to the app.']
+            # No prefix, pass through
+            print(f"🔍 Middleware Debug - No prefix, passing through")
+            return self.app(environ, start_response)
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Check if we're running behind a reverse proxy with path prefix
+# Apply PATH_PREFIX if defined
 path_prefix = os.getenv('PATH_PREFIX', '')
 print(f"🔧 PATH_PREFIX environment variable: '{path_prefix}'", flush=True)
 if path_prefix:
-    print(f"✅ Applying WSGI middleware with prefix: {path_prefix}", flush=True)
+    print(f"🔗 Applying path prefix middleware: {path_prefix}")
     app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=path_prefix)
+    print(f"✅ PrefixMiddleware applied with prefix: {path_prefix}")
 else:
-    print("⚠️ No PATH_PREFIX set - API will be accessible without prefix", flush=True)
+    print("⚠️ No PATH_PREFIX defined, API will be served at root path")
 
 api = Api(
     app,
@@ -930,6 +959,8 @@ if __name__ == '__main__':
     print(f"🏥 Health check: http://localhost:{port}/health")
     print(f"📖 API info: http://localhost:{port}/")
     print("=" * 50)
+    
+    # PATH_PREFIX middleware is already applied at app initialization
     
     # Start the server
     app.run(
