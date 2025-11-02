@@ -50,7 +50,7 @@ api = Api(
     title='Thakii Worker Service API',
     description='Video processing API for converting lectures to PDF transcripts',
     doc='/swagger/',  # Swagger UI will be available at /swagger/
-    prefix='/api/v1'
+    prefix=''  # No prefix needed - nginx forwards /api/v1/... and we handle it in namespace paths
 )
 
 # Import Firebase integration (REQUIRED)
@@ -63,11 +63,11 @@ from core.queue_manager import queue_manager
 # Local task storage for API server (fallback when Firebase unavailable)
 tasks_storage = {}
 
-# Create API namespaces
+# Create API namespaces with full paths including /api/v1
 health_ns = Namespace('health', description='Health check operations')
 videos_ns = Namespace('videos', description='Video processing operations')
-api.add_namespace(health_ns, path='/health')
-api.add_namespace(videos_ns, path='/videos')
+api.add_namespace(health_ns, path='/api/v1/health')
+api.add_namespace(videos_ns, path='/api/v1/videos')
 
 # Swagger models
 video_upload_model = api.model('VideoUpload', {
