@@ -1,2 +1,2 @@
 # Modify this file to trigger a deployment to thakii-03
-Deployment trigger: 2025-11-02 03:40:00 - Add dotenv loading to enable PATH_PREFIX
+Deployment trigger: 2025-11-02 03:45:00 - Debug PATH_PREFIX loading
