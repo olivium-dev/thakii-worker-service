@@ -33,13 +33,17 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Initialize Flask-RESTX API with Swagger documentation
+# Check if we're running behind a reverse proxy with path prefix
+path_prefix = os.getenv('PATH_PREFIX', '')
+swagger_path = f'{path_prefix}/swagger/' if path_prefix else '/swagger/'
+
 api = Api(
     app,
     version='1.0',
     title='Thakii Worker Service API',
     description='Video processing API for converting lectures to PDF transcripts',
-    doc='/swagger/',  # Swagger UI will be available at /swagger/
-    prefix='/api/v1'
+    doc=swagger_path,  # Swagger UI will be available at the configured path
+    prefix=f'{path_prefix}/api/v1' if path_prefix else '/api/v1'
 )
 
 # Import Firebase integration (REQUIRED)
@@ -228,6 +232,10 @@ class HealthCheck(Resource):
     @health_ns.marshal_with(health_model)
     def get(self):
         """Health check endpoint - returns service status and available endpoints"""
+        path_prefix = os.getenv('PATH_PREFIX', '')
+        api_prefix = f'{path_prefix}/api/v1' if path_prefix else '/api/v1'
+        swagger_path = f'{path_prefix}/swagger/' if path_prefix else '/swagger/'
+        
         return {
             "database": "Local",
             "service": "Thakii Lecture2PDF Service",
@@ -236,12 +244,12 @@ class HealthCheck(Resource):
             "timestamp": datetime.datetime.now().isoformat(),
             "api_version": "1.0",
             "endpoints": {
-                "upload": "/api/v1/videos/upload",
-                "list": "/api/v1/videos/list", 
-                "download": "/api/v1/videos/download/{video_id}.pdf",
-                "process": "/api/v1/videos/process/{video_id}",
-                "generate": "/api/v1/videos/generate-pdf",
-                "swagger": "/swagger/"
+                "upload": f"{api_prefix}/videos/upload",
+                "list": f"{api_prefix}/videos/list", 
+                "download": f"{api_prefix}/videos/download/{{video_id}}.pdf",
+                "process": f"{api_prefix}/videos/process/{{video_id}}",
+                "generate": f"{api_prefix}/videos/generate-pdf",
+                "swagger": swagger_path
             }
         }
 
@@ -780,7 +788,9 @@ def get_video_status(video_id):
 def api_root():
     """Root endpoint - redirects to Swagger documentation"""
     from flask import redirect
-    return redirect('/swagger/')
+    path_prefix = os.getenv('PATH_PREFIX', '')
+    swagger_path = f'{path_prefix}/swagger/' if path_prefix else '/swagger/'
+    return redirect(swagger_path)
 
 @api.route('/info')
 class APIInfo(Resource):

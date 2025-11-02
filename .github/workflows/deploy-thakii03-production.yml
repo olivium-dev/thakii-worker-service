@@ -78,6 +78,7 @@ jobs:
         WORKER_POLL_INTERVAL=10
         MAX_CONCURRENT_TASKS=3
         TEMP_DIR=/tmp/thakii-worker
+        PATH_PREFIX=/thakii-worker
         DOTENV
         
         # Start Cloudflare tunnel
