@@ -42,10 +42,7 @@ jobs:
         echo "🚀 Deploying worker service to thakii-03 via GitHub Actions..."
         
         # Create tarball of worker service files
-        echo "📦 Creating tarball with files:"
-        ls -la core src worker.py api_server.py requirements.txt fonts/ 2>/dev/null || echo "Some files missing"
-        tar czf worker-service.tar.gz core src worker.py api_server.py requirements.txt fonts/
-        echo "✅ Tarball created: $(ls -lh worker-service.tar.gz)"
+        tar czf worker-service.tar.gz core src worker.py api_server.py requirements.txt
         
         # Start Cloudflare tunnel in background
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2200 &
@@ -55,13 +52,10 @@ jobs:
         # Ensure worker directory exists
         sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2200 fanusdigital@localhost 'mkdir -p /Users/fanusdigital/thakii-worker-service/{core,src,logs}'
         
-        # Copy tarball to server and verify
+        # Copy tarball to server
         sshpass -p "$THAKII_PASSWORD" scp -o StrictHostKeyChecking=no -P 2200 worker-service.tar.gz fanusdigital@localhost:/tmp/
         
-        # Verify file was copied successfully
-        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2200 fanusdigital@localhost 'ls -lh /tmp/worker-service.tar.gz'
-        
-        echo "✅ Files copied and verified on server"
+        echo "✅ Files copied to server"
         
         # Cleanup tunnel
         kill $TUNNEL_PID 2>/dev/null || true
@@ -106,10 +100,7 @@ jobs:
         
         # Extract files
         echo "📦 Extracting worker service files..."
-        echo "📋 Checking tarball:"
-        ls -lh /tmp/worker-service.tar.gz || echo "❌ Tarball not found!"
         tar xzf /tmp/worker-service.tar.gz
-        echo "✅ Files extracted successfully"
         rm /tmp/worker-service.tar.gz
         
         # Verify files were copied
