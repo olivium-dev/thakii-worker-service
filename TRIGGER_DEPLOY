@@ -1,2 +1,2 @@
 # Modify this file to trigger a deployment to thakii-03
-Deployment trigger: 2025-11-02 03:20:00 - Fix Swagger UI with WSGI middleware
+Deployment trigger: 2025-11-02 03:25:00 - Add PATH_PREFIX to LaunchDaemon environment
