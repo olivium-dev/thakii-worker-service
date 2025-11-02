@@ -120,7 +120,7 @@ jobs:
         # Install/update dependencies (only required packages)
         echo "📦 Installing dependencies..."
         /opt/homebrew/bin/python3 -m pip install --break-system-packages \
-          flask flask-cors boto3 botocore psycopg2-binary python-dotenv requests \
+          flask flask-cors flask-restx boto3 botocore psycopg2-binary python-dotenv requests \
           openai-whisper torch torchaudio srt opencv-python-headless fpdf2 moviepy 2>&1 | tail -20
         
         echo "✅ Dependencies installed"
