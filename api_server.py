@@ -22,6 +22,17 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Debug: Print environment variables
+print(f"🔍 Debug - Current working directory: {os.getcwd()}")
+print(f"🔍 Debug - PATH_PREFIX from env: '{os.getenv('PATH_PREFIX', 'NOT_SET')}'")
+print(f"🔍 Debug - .env file exists: {os.path.exists('.env')}")
+if os.path.exists('.env'):
+    with open('.env', 'r') as f:
+        env_content = f.read()
+        print(f"🔍 Debug - .env content preview: {env_content[:200]}...")
+else:
+    print("🔍 Debug - No .env file found, checking environment variables directly")
+
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
@@ -40,6 +51,7 @@ class PrefixMiddleware(object):
 
     def __call__(self, environ, start_response):
         path_info = environ['PATH_INFO']
+        print(f"🔍 Middleware Debug - Incoming path: {path_info}, Prefix: {self.prefix}")
         
         if self.prefix:
             # Check if the path starts with our prefix
@@ -51,13 +63,16 @@ class PrefixMiddleware(object):
                     new_path = '/' + new_path
                 environ['PATH_INFO'] = new_path
                 environ['SCRIPT_NAME'] = self.prefix
+                print(f"🔍 Middleware Debug - Path matched, new path: {new_path}")
                 return self.app(environ, start_response)
             else:
                 # Path doesn't match prefix, return 404
+                print(f"🔍 Middleware Debug - Path doesn't match prefix, returning 404")
                 start_response('404 Not Found', [('Content-Type', 'text/plain')])
                 return [b'This url does not belong to the app.']
         else:
             # No prefix, pass through
+            print(f"🔍 Middleware Debug - No prefix, passing through")
             return self.app(environ, start_response)
 
 app = Flask(__name__)
