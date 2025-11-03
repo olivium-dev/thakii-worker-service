@@ -51,20 +51,26 @@ jobs:
         echo '✅ Worker .env updated:'
         grep -E 'ENABLE_WORKER_API|MAX_CONCURRENT_TASKS' .env
         
-        # Stop old worker and start Worker API worker
-        launchctl unload ~/Library/LaunchAgents/com.thakii.worker.plist 2>/dev/null || true
+        # Stop any existing worker_api process
+        pkill -f "python.*worker_api.py" || echo "No existing worker_api process"
+        sleep 2
         
-        # Install Worker API LaunchDaemon if not already installed
-        if [ ! -f ~/Library/LaunchAgents/com.thakii.worker_api.plist ]; then
-          cp com.thakii.worker_api.plist ~/Library/LaunchAgents/
+        # Start Worker API manually (NO LaunchAgent)
+        echo '🚀 Starting Worker API manually...'
+        cd /Users/fanusdigital/thakii-worker-service
+        nohup /opt/homebrew/bin/python3 -u worker_api.py > logs/worker_api.log 2>&1 &
+        WORKER_API_PID=$!
+        sleep 3
+        
+        # Verify it's running
+        if ps -p $WORKER_API_PID > /dev/null; then
+          echo "✅ Worker API started successfully (PID: $WORKER_API_PID)"
+        else
+          echo "❌ Worker API failed to start - check logs/worker_api.log"
+          tail -20 logs/worker_api.log
         fi
         
-        # Start Worker API worker
-        launchctl load -w ~/Library/LaunchAgents/com.thakii.worker_api.plist
-        sleep 3
-        launchctl list | grep com.thakii.worker_api
-        
-        echo '✅ Worker API enabled and service restarted'
+        echo '✅ Worker API enabled and started manually'
         ENDSSH
         
         kill $TUNNEL_PID 2>/dev/null || true
