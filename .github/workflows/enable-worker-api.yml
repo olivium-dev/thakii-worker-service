@@ -1,0 +1,70 @@
+name: Enable Worker API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  enable-worker:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+    
+    - name: 🔧 Setup SSH via Cloudflare
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+    
+    - name: Enable Worker API on thakii-03
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2200 &
+        TUNNEL_PID=$!
+        sleep 15
+        
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2200 fanusdigital@localhost << 'ENDSSH'
+        set -e
+        cd /Users/fanusdigital/thakii-worker-service
+        
+        echo '🔧 Enabling Worker API on worker...'
+        
+        # Backup current .env
+        cp .env .env.backup-$(date +%Y%m%d%H%M%S)
+        
+        # Enable Worker API
+        if grep -q 'ENABLE_WORKER_API' .env; then
+          sed -i '' 's/ENABLE_WORKER_API=.*/ENABLE_WORKER_API=true/' .env
+        else
+          echo 'ENABLE_WORKER_API=true' >> .env
+        fi
+        
+        # Set MAX_CONCURRENT_TASKS to 4
+        if grep -q 'MAX_CONCURRENT_TASKS' .env; then
+          sed -i '' 's/MAX_CONCURRENT_TASKS=.*/MAX_CONCURRENT_TASKS=4/' .env
+        else
+          echo 'MAX_CONCURRENT_TASKS=4' >> .env
+        fi
+        
+        # Verify the change
+        echo '✅ Worker .env updated:'
+        grep -E 'ENABLE_WORKER_API|MAX_CONCURRENT_TASKS' .env
+        
+        # Stop old worker and start Worker API worker
+        launchctl unload ~/Library/LaunchAgents/com.thakii.worker.plist 2>/dev/null || true
+        
+        # Install Worker API LaunchDaemon if not already installed
+        if [ ! -f ~/Library/LaunchAgents/com.thakii.worker_api.plist ]; then
+          cp com.thakii.worker_api.plist ~/Library/LaunchAgents/
+        fi
+        
+        # Start Worker API worker
+        launchctl load -w ~/Library/LaunchAgents/com.thakii.worker_api.plist
+        sleep 3
+        launchctl list | grep com.thakii.worker_api
+        
+        echo '✅ Worker API enabled and service restarted'
+        ENDSSH
+        
+        kill $TUNNEL_PID 2>/dev/null || true
