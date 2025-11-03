@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.thakii.worker_api</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/fanusdigital/Desktop/thakii-worker-service/worker_api.py</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/fanusdigital/Desktop/thakii-worker-service/logs/worker_api.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/fanusdigital/Desktop/thakii-worker-service/logs/worker_api_error.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/fanusdigital/Desktop/thakii-worker-service</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONPATH</key>
+        <string>/Users/fanusdigital/Desktop/thakii-worker-service</string>
+        <key>ENABLE_WORKER_API</key>
+        <string>true</string>
+        <key>BACKEND_API_URL</key>
+        <string>https://thakii-02.fanusdigital.site/thakii-be</string>
+        <key>WORKER_ID</key>
+        <string>worker-thakii-03</string>
+        <key>MAX_CONCURRENT_TASKS</key>
+        <string>4</string>
+        <key>WORKER_POLL_INTERVAL</key>
+        <string>10</string>
+    </dict>
+</dict>
+</plist>

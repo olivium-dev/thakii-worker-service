@@ -41,8 +41,8 @@ jobs:
       run: |
         echo "🚀 Deploying worker service to thakii-03 via GitHub Actions..."
         
-        # Create tarball of worker service files
-        tar czf worker-service.tar.gz core src worker.py api_server.py rq_worker.py requirements.txt scripts
+        # Create tarball of worker service files (including Worker API files)
+        tar czf worker-service.tar.gz core src worker.py api_server.py rq_worker.py worker_api.py requirements.txt scripts com.thakii.worker_api.plist
         
         # Start Cloudflare tunnel in background
         cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2200 &
@@ -106,6 +106,8 @@ jobs:
         ENABLE_REDIS_QUEUE=false
         REDIS_HOST=localhost
         REDIS_PORT=6379
+        ENABLE_WORKER_API=false
+        WORKER_ID=worker-thakii-03
         DOTENV
         
         # Start Cloudflare tunnel
