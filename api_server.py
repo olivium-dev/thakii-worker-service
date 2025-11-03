@@ -12,15 +12,9 @@ import threading
 import time
 from pathlib import Path
 from flask import Flask, request, jsonify, send_file
-from flask_restx import Api, Resource, fields, Namespace
-from flask_cors import CORS
 import tempfile
 import subprocess
 import sys
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -33,142 +27,14 @@ except ImportError as e:
     print(f"⚠️ Warning: Could not import src.main - {e}")
     main_runner = None
 
-class PrefixMiddleware(object):
-    def __init__(self, app, prefix=''):
-        self.app = app
-        self.prefix = prefix
-
-    def __call__(self, environ, start_response):
-        if environ['PATH_INFO'].startswith(self.prefix):
-            environ['PATH_INFO'] = environ['PATH_INFO'][len(self.prefix):]
-            environ['SCRIPT_NAME'] = self.prefix
-            return self.app(environ, start_response)
-        else:
-            start_response('404', [('Content-Type', 'text/plain')])
-            return [b'This url does not belong to the app.']
-
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
-
-# Check if we're running behind a reverse proxy with path prefix
-path_prefix = os.getenv('PATH_PREFIX', '')
-print(f"🔧 PATH_PREFIX environment variable: '{path_prefix}'", flush=True)
-if path_prefix:
-    print(f"✅ Applying WSGI middleware with prefix: {path_prefix}", flush=True)
-    app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=path_prefix)
-else:
-    print("⚠️ No PATH_PREFIX set - API will be accessible without prefix", flush=True)
-
-api = Api(
-    app,
-    version='1.0',
-    title='Thakii Worker Service API',
-    description='Video processing API for converting lectures to PDF transcripts',
-    doc='/swagger/',  # Swagger UI will be available at /swagger/
-    prefix='/api/v1'
-)
 
 # Import Firebase integration (REQUIRED)
 from core.postgres_integration import postgres_client
 print("✅ Firebase integration loaded - Local storage disabled")
 
-# Import Queue Manager for Redis integration
-from core.queue_manager import queue_manager
-
 # Local task storage for API server (fallback when Firebase unavailable)
 tasks_storage = {}
-
-# Create API namespaces
-health_ns = Namespace('health', description='Health check operations')
-videos_ns = Namespace('videos', description='Video processing operations')
-api.add_namespace(health_ns, path='/health')
-api.add_namespace(videos_ns, path='/videos')
-
-# Swagger models
-video_upload_model = api.model('VideoUpload', {
-    'filename': fields.String(required=True, description='Video filename'),
-    'user_id': fields.String(required=True, description='User ID'),
-    'size': fields.Integer(description='File size in bytes'),
-    'content_type': fields.String(description='MIME type', default='video/mp4'),
-    'user_email': fields.String(description='User email address')
-})
-
-video_response_model = api.model('VideoResponse', {
-    'video_id': fields.String(description='Unique video identifier'),
-    'status': fields.String(description='Processing status', enum=['uploaded', 'processing', 'completed', 'failed']),
-    'filename': fields.String(description='Original filename'),
-    'created_at': fields.String(description='Upload timestamp'),
-    'message': fields.String(description='Response message'),
-    'progress_percentage': fields.Float(description='Processing progress percentage (0-100)')
-})
-
-video_status_model = api.model('VideoStatus', {
-    'video_id': fields.String(description='Unique video identifier'),
-    'status': fields.String(description='Processing status', enum=['uploaded', 'processing', 'completed', 'failed']),
-    'filename': fields.String(description='Original filename'),
-    'created_at': fields.String(description='Creation timestamp'),
-    'updated_at': fields.String(description='Last update timestamp'),
-    'size': fields.Integer(description='File size in bytes'),
-    'user_id': fields.String(description='User ID'),
-    'user_email': fields.String(description='User email'),
-    'pdf_ready': fields.Boolean(description='Whether PDF is ready for download'),
-    'pdf_url': fields.String(description='PDF download URL (if ready)'),
-    'download_url': fields.String(description='Direct download URL (if ready)'),
-    'error': fields.String(description='Error message (if failed)'),
-    'progress_percentage': fields.Float(description='Processing progress percentage (0-100)')
-})
-
-video_detail_model = api.model('Video', {
-    'id': fields.String(description='Video ID'),
-    'filename': fields.String(description='Filename'),
-    'status': fields.String(description='Processing status', enum=['uploaded', 'processing', 'completed', 'failed']),
-    'created_at': fields.String(description='Creation date'),
-    'updated_at': fields.String(description='Last update'),
-    'size': fields.Integer(description='File size in bytes'),
-    'user_id': fields.String(description='User ID'),
-    'user_email': fields.String(description='User email'),
-    'pdf_url': fields.String(description='PDF download URL'),
-    'progress_percentage': fields.Float(description='Processing progress percentage (0-100)')
-})
-
-video_list_model = api.model('VideoList', {
-    'videos': fields.List(fields.Nested(video_detail_model)),
-    'total': fields.Integer(description='Total number of videos'),
-    'timestamp': fields.String(description='Response timestamp')
-})
-
-health_model = api.model('Health', {
-    'service': fields.String(description='Service name'),
-    'status': fields.String(description='Service status'),
-    'timestamp': fields.String(description='Current timestamp'),
-    'api_version': fields.String(description='API version'),
-    'database': fields.String(description='Database status'),
-    'storage': fields.String(description='Storage status'),
-    'redis_queue': fields.String(description='Redis queue status (disabled/available/unavailable)'),
-    'endpoints': fields.Raw(description='Available endpoints')
-})
-
-# File upload parser for multipart/form-data
-from werkzeug.datastructures import FileStorage
-upload_parser = api.parser()
-upload_parser.add_argument('video', location='files', type=FileStorage, required=True, help='Video file to process')
-
-# Processing response model for generate-pdf endpoint
-processing_response_model = api.model('ProcessingResponse', {
-    'video_id': fields.String(description='Unique video identifier'),
-    'status': fields.String(description='Processing status', enum=['processing']),
-    'message': fields.String(description='Processing message'),
-    'filename': fields.String(description='Original filename'),
-    'created_at': fields.String(description='Upload timestamp'),
-    'size': fields.Integer(description='File size in bytes'),
-    'progress_percentage': fields.Float(description='Processing progress percentage (0-100)')
-})
-
-error_model = api.model('Error', {
-    'error': fields.String(description='Error message'),
-    'message': fields.String(description='Detailed error description'),
-    'timestamp': fields.String(description='Error timestamp')
-})
 
 def cleanup_local_files(video_id):
     """Clean up local video and PDF files for a video_id"""
@@ -197,19 +63,13 @@ def real_video_processing(video_id, video_path):
     output_pdf = None
     try:
         print(f"🎬 Starting REAL processing for video {video_id}")
-        # Update status in Firebase with 0% progress
+        # Update status in Firebase
         try:
-            postgres_client.update_task_status(video_id, "processing", progress_percentage=0.0)
+            postgres_client.update_task_status(video_id, "processing")
             print(f"✅ Updated Firebase status to processing: {video_id}")
         except Exception as e:
             print(f"⚠️ Failed to update Firebase status: {e}")
         
-        # Update progress to 10% - Starting processing
-        try:
-            postgres_client.update_task_status(video_id, "processing", progress_percentage=10.0)
-        except Exception as e:
-            print(f"⚠️ Failed to update progress: {e}")
-            
         # Method 1: Try to use imported main runner
         if main_runner:
             print(f"📚 Using imported CommandLineArgRunner")
@@ -217,21 +77,9 @@ def real_video_processing(video_id, video_path):
             output_pdf = f"{video_id}.pdf"
             args = [str(video_path), "-o", output_pdf]
             
-            # Update progress to 20% - Starting subtitle generation
-            try:
-                postgres_client.update_task_status(video_id, "processing", progress_percentage=20.0)
-            except Exception as e:
-                print(f"⚠️ Failed to update progress: {e}")
-                
             # Parse and run
             print(f"🔧 Args: {args}")
             main_runner.run(args)
-            
-            # Update progress to 80% - PDF generation completed
-            try:
-                postgres_client.update_task_status(video_id, "processing", progress_percentage=80.0)
-            except Exception as e:
-                print(f"⚠️ Failed to update progress: {e}")
             
             pdf_path = Path(output_pdf)
             if not pdf_path.exists():
@@ -240,23 +88,10 @@ def real_video_processing(video_id, video_path):
             # Method 2: Direct subprocess call to src/main.py
             print(f"🔧 Using subprocess call to src/main.py")
             output_pdf = f"{video_id}.pdf"
-            
-            # Update progress to 20% - Starting subtitle generation
-            try:
-                postgres_client.update_task_status(video_id, "processing", progress_percentage=20.0)
-            except Exception as e:
-                print(f"⚠️ Failed to update progress: {e}")
-                
             result = subprocess.run([
                 sys.executable, '-m', 'src.main', str(video_path), '-o', output_pdf
             ], capture_output=True, text=True, cwd=os.path.dirname(__file__))
             
-            # Update progress to 80% - PDF generation completed
-            try:
-                postgres_client.update_task_status(video_id, "processing", progress_percentage=80.0)
-            except Exception as e:
-                print(f"⚠️ Failed to update progress: {e}")
-                
             if result.returncode != 0:
                 raise Exception(f"Main process failed: {result.stderr}")
             
@@ -265,15 +100,10 @@ def real_video_processing(video_id, video_path):
             if not pdf_path.exists():
                 raise Exception("PDF was not generated by main process")
         
-        # Update progress to 90% - Finalizing
+        # Update status to completed
+        # Update status in Firebase
         try:
-            postgres_client.update_task_status(video_id, "processing", progress_percentage=90.0)
-        except Exception as e:
-            print(f"⚠️ Failed to update progress: {e}")
-            
-        # Update status to completed with 100% progress
-        try:
-            postgres_client.update_task_status(video_id, "completed", pdf_url=f"local://{pdf_path}", progress_percentage=100.0)
+            postgres_client.update_task_status(video_id, "completed", pdf_url=f"local://{pdf_path}")
             print(f"✅ Updated Firebase status to completed: {video_id}")
         except Exception as e:
             print(f"⚠️ Failed to update Firebase status: {e}")
@@ -292,230 +122,140 @@ def real_video_processing(video_id, video_path):
         # Always clean up local files after processing (success or failure)
         cleanup_local_files(video_id)
 
-@health_ns.route('/')
-class HealthCheck(Resource):
-    @health_ns.doc('health_check')
-    @health_ns.marshal_with(health_model)
-    def get(self):
-        """Health check endpoint - returns service status and available endpoints"""
-        redis_status = "disabled"
-        if queue_manager.enabled:
-            redis_status = "available" if queue_manager.is_available() else "unavailable"
-        
-        return {
-            "database": "Local",
-            "service": "Thakii Lecture2PDF Service",
-            "status": "healthy",
-            "storage": "Local",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "api_version": "1.0",
-            "redis_queue": redis_status,
-            "endpoints": {
-                "upload": "/api/v1/videos/upload",
-                "list": "/api/v1/videos/list", 
-                "download": "/api/v1/videos/download/{video_id}.pdf",
-                "process": "/api/v1/videos/process/{video_id}",
-                "generate": "/api/v1/videos/generate-pdf",
-                "swagger": "/swagger/"
-            }
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint - no authentication required"""
+    return jsonify({
+        "database": "Local",
+        "service": "Thakii Lecture2PDF Service",
+        "status": "healthy",
+        "storage": "Local",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "api_version": "1.0",
+        "endpoints": {
+            "upload": "/upload",
+            "list": "/list", 
+            "download": "/download/{video_id}.pdf",
+            "process": "/process/{video_id}",
+            "generate": "/generate-pdf"
         }
+    })
 
-@videos_ns.route('/upload')
-class VideoUpload(Resource):
-    @videos_ns.doc('upload_video')
-    @videos_ns.expect(video_upload_model)
-    @videos_ns.marshal_with(video_response_model, code=201)
-    @videos_ns.response(400, 'Bad Request', error_model)
-    @videos_ns.response(500, 'Internal Server Error', error_model)
-    def post(self):
-        """Upload video metadata - creates a new video processing task"""
+@app.route('/upload', methods=['POST'])
+def upload_video():
+    """Upload video endpoint - no authentication required"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+        
+        filename = data.get('filename')
+        user_id = data.get('user_id')
+        size = data.get('size', 0)
+        content_type = data.get('content_type', 'video/mp4')
+        user_email = data.get('user_email', 'anonymous@thakii.dev')
+        
+        if not filename:
+            return jsonify({"error": "filename is required"}), 400
+        
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+        
+        # Generate unique video ID
+        video_id = f"video-{uuid.uuid4().hex[:8]}"
+        
+        # Create task record
+        task = {
+            "id": video_id,
+            "filename": filename,
+            "size": size,
+            "content_type": content_type,
+            "user_id": user_id,
+            "user_email": user_email,
+            "status": "uploaded",
+            "created_at": datetime.datetime.now().isoformat(),
+            "updated_at": datetime.datetime.now().isoformat()
+        }
+        
+        # Store task in memory
+        tasks_storage[video_id] = task
+        
+        # Store in Firebase if available
         try:
-            data = request.get_json()
-            
-            if not data:
-                return {"error": "No JSON data provided", "timestamp": datetime.datetime.now().isoformat()}, 400
-            
-            filename = data.get('filename')
-            user_id = data.get('user_id')
-            size = data.get('size', 0)
-            content_type = data.get('content_type', 'video/mp4')
-            user_email = data.get('user_email', 'anonymous@thakii.dev')
-            
-            if not filename:
-                return {"error": "filename is required", "timestamp": datetime.datetime.now().isoformat()}, 400
-            
-            if not user_id:
-                return {"error": "user_id is required", "timestamp": datetime.datetime.now().isoformat()}, 400
-            
-            # Generate unique video ID
-            video_id = f"video-{uuid.uuid4().hex[:8]}"
-            
-            # Create task record
-            task = {
-                "id": video_id,
-                "filename": filename,
-                "size": size,
-                "content_type": content_type,
-                "user_id": user_id,
-                "user_email": user_email,
-                "status": "uploaded",
-                "created_at": datetime.datetime.now().isoformat(),
-                "updated_at": datetime.datetime.now().isoformat()
-            }
-            
-            # Store task in memory
-            tasks_storage[video_id] = task
-            
-            # Store in Firebase if available
+            from core.postgres_integration import postgres_client
+            if postgres_client.is_available():
+                postgres_client.update_task_status(
+                    video_id, "uploaded",
+                    filename=filename,
+                    size=size,
+                    user_id=user_id,
+                    user_email=user_email,
+                    content_type=content_type
+                )
+        except Exception as e:
+            print(f"Firebase storage failed: {e}")
+        
+        return jsonify({
+            "video_id": video_id,
+            "status": "uploaded",
+            "message": "Video upload request received successfully",
+            "filename": filename,
+            "user_id": user_id,
+            "size": size,
+            "created_at": task["created_at"]
+        }), 201
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/list', methods=['GET'])
+def list_videos():
+    """List all videos endpoint - no authentication required"""
+    try:
+        videos = []
+        
+        # Get all videos from Firebase
+        all_tasks = postgres_client.get_all_tasks() if hasattr(postgres_client, 'get_all_tasks') else []
+        pending_tasks = postgres_client.get_pending_tasks() or []
+        
+        # If get_all_tasks is not available, try to get tasks by status
+        if not all_tasks and hasattr(postgres_client, 'db') and postgres_client.db:
             try:
-                from core.postgres_integration import postgres_client
-                if postgres_client.is_available():
-                    postgres_client.update_task_status(
-                        video_id, "uploaded",
-                        filename=filename,
-                        size=size,
-                        user_id=user_id,
-                        user_email=user_email,
-                        content_type=content_type
-                    )
+                # Get all documents from video_tasks collection
+                docs = postgres_client.db.collection('video_tasks').stream()
+                all_tasks = []
+                for doc in docs:
+                    task_data = doc.to_dict()
+                    task_data['id'] = doc.id
+                    all_tasks.append(task_data)
             except Exception as e:
-                print(f"Firebase storage failed: {e}")
-            
-            return {
-                "video_id": video_id,
-                "status": "uploaded",
-                "message": "Video upload request received successfully",
-                "filename": filename,
-                "created_at": task["created_at"],
-                "progress_percentage": 0.0
-            }, 201
-            
-        except Exception as e:
-            return {"error": str(e), "timestamp": datetime.datetime.now().isoformat()}, 500
-
-@videos_ns.route('/list')
-class VideoList(Resource):
-    @videos_ns.doc('list_videos')
-    @videos_ns.marshal_with(video_list_model)
-    @videos_ns.response(500, 'Internal Server Error', error_model)
-    def get(self):
-        """List all videos - returns all video processing tasks"""
-        try:
-            videos = []
-            
-            # Get all videos from Firebase
-            all_tasks = postgres_client.get_all_tasks() if hasattr(postgres_client, 'get_all_tasks') else []
-            pending_tasks = postgres_client.get_pending_tasks() or []
-            
-            # If get_all_tasks is not available, try to get tasks by status
-            if not all_tasks and hasattr(postgres_client, 'db') and postgres_client.db:
-                try:
-                    # Get all documents from video_tasks collection
-                    docs = postgres_client.db.collection('video_tasks').stream()
-                    all_tasks = []
-                    for doc in docs:
-                        task_data = doc.to_dict()
-                        task_data['id'] = doc.id
-                        all_tasks.append(task_data)
-                except Exception as e:
-                    print(f"Error getting all tasks: {e}")
-                    all_tasks = pending_tasks  # Fallback to pending tasks
-            
-            # Convert Firebase tasks to API format
-            for task in all_tasks:
-                progress = task.get("progress_percentage", 0.0)
-                # Set progress to 100% if completed
-                if task.get("status") == "completed":
-                    progress = 100.0
-                    
-                videos.append({
-                    "id": task.get("id", "unknown"),
-                    "filename": task.get("filename", "unknown"),
-                    "status": task.get("status", "unknown"),
-                    "created_at": task.get("upload_date", task.get("created_at", "")),
-                    "updated_at": task.get("processing_end", task.get("updated_at", "")),
-                    "size": task.get("size", 0),
-                    "user_id": task.get("user_id", ""),
-                    "user_email": task.get("user_email", ""),
-                    "pdf_url": task.get("pdf_url", ""),
-                    "progress_percentage": progress
-                })
-            
-            return {
-                "videos": videos,
-                "total": len(videos),
-                "timestamp": datetime.datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            return {"error": str(e), "timestamp": datetime.datetime.now().isoformat()}, 500
-
-@videos_ns.route('/generate-pdf')
-class GeneratePDF(Resource):
-    @videos_ns.doc('generate_pdf')
-    @videos_ns.response(201, 'Processing Started', video_response_model)
-    @videos_ns.response(400, 'Bad Request', error_model)
-    @videos_ns.response(500, 'Internal Server Error', error_model)
-    def post(self):
-        """Upload video file and start PDF generation - accepts multipart/form-data with video file"""
-        try:
-            # Check if video file was uploaded
-            if 'video' not in request.files:
-                return {"error": "No video file provided", "timestamp": datetime.datetime.now().isoformat()}, 400
-            
-            video_file = request.files['video']
-            if video_file.filename == '':
-                return {"error": "No video file selected", "timestamp": datetime.datetime.now().isoformat()}, 400
-            
-            # Generate unique ID
-            video_id = f"direct-{uuid.uuid4().hex[:8]}"
-            
-            # Save video file to local directory for processing
-            video_path = Path(f"{video_id}.mp4")
-            video_file.save(str(video_path))
-            
-            print(f"📁 Video saved to: {video_path.absolute()}")
-            
-            # Create task record
-            task = {
-                "id": video_id,
-                "filename": video_file.filename,
-                "status": "uploaded",
-                "upload_date": datetime.datetime.now().isoformat(),
-                "created_at": datetime.datetime.now().isoformat(),
-                "updated_at": datetime.datetime.now().isoformat(),
-                "size": video_path.stat().st_size,
-                "user_id": "direct_upload",
-                "user_email": "direct@thakii.dev"
-            }
-            
-            # Save task to Firebase
-            try:
-                postgres_client.create_task(video_id, task)
-                print(f"✅ Task created in Firebase: {video_id}")
-            except Exception as e:
-                print(f"⚠️ Failed to create task in Firebase: {e}")
-            
-            # Start REAL background processing immediately
-            print(f"🚀 Starting REAL processing thread for uploaded video {video_id}")
-            processing_thread = threading.Thread(
-                target=real_video_processing, 
-                args=(video_id, video_path)
-            )
-            processing_thread.daemon = True
-            processing_thread.start()
-            
-            return {
-                "video_id": video_id,
-                "status": "processing",
-                "message": "PDF generation started in background",
-                "filename": video_file.filename,
-                "created_at": task["created_at"],
-                "progress_percentage": 0.0
-            }, 201
-                    
-        except Exception as e:
-            return {"error": str(e), "timestamp": datetime.datetime.now().isoformat()}, 500
+                print(f"Error getting all tasks: {e}")
+                all_tasks = pending_tasks  # Fallback to pending tasks
+        
+        # Convert Firebase tasks to API format
+        for task in all_tasks:
+            videos.append({
+                "id": task.get("id", "unknown"),
+                "filename": task.get("filename", "unknown"),
+                "status": task.get("status", "unknown"),
+                "created_at": task.get("upload_date", task.get("created_at", "")),
+                "updated_at": task.get("processing_end", task.get("updated_at", "")),
+                "size": task.get("size", 0),
+                "user_id": task.get("user_id", ""),
+                "user_email": task.get("user_email", ""),
+                "pdf_url": task.get("pdf_url", "")
+            })
+        
+        return jsonify({
+            "videos": videos,
+            "total": len(videos),
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "Firebase"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e), "source": "Firebase"}), 500
 
 @app.route('/list/<user_id>', methods=['GET'])
 def list_videos_by_user(user_id):
@@ -657,37 +397,43 @@ def process_video_from_s3():
         
         print(f"📤 Processing S3 video: {video_id} for user: {user_id}")
         
-        # Check if Redis queue is enabled
-        if queue_manager.is_available():
+        # Update task status to processing
+        try:
+            postgres_client.update_task_status(video_id, "processing")
+            print(f"✅ Task status updated to processing: {video_id}")
+        except Exception as e:
+            print(f"⚠️ Failed to update task status: {e}")
+        
+        # Start background processing
+        def background_s3_processing():
             try:
-                job_id = queue_manager.enqueue_video(
-                    video_id=video_id,
-                    s3_key=s3_key,
-                    filename=filename,
-                    user_id=user_id
-                )
-                return jsonify({
-                    "video_id": video_id,
-                    "status": "in_queue",
-                    "message": "Video enqueued for processing",
-                    "job_id": job_id
-                }), 202
+                print(f"🎬 Starting REAL enhanced processing for video {video_id}")
+                print(f"   🔑 S3 Key: {s3_key}")
+                print(f"   📁 Filename: {filename}")
+                
+                # Use REAL enhanced worker logic instead of mock
+                from worker import EnhancedWorker
+                worker = EnhancedWorker()
+                success = worker.process_video(video_id, s3_key=s3_key, filename=filename)
+                
+                if success:
+                    print(f"✅ REAL enhanced processing completed: {video_id}")
+                else:
+                    print(f"❌ REAL processing failed: {video_id}")
+                    
             except Exception as e:
-                return jsonify({"error": f"Failed to enqueue: {str(e)}"}), 500
-        else:
-            # Legacy: Update database, let polling worker handle it
-            print(f"📋 Redis disabled - {video_id} will be processed via polling")
-            try:
-                postgres_client.update_task_status(video_id, "in_queue")
-                print(f"✅ Task status updated to in_queue: {video_id}")
-            except Exception as e:
-                print(f"⚠️ Failed to update task status: {e}")
-            
-            return jsonify({
-                "video_id": video_id,
-                "status": "in_queue",
-                "message": "Video queued for processing (database polling)"
-            }), 202
+                print(f"❌ Real processing failed: {e}")
+                postgres_client.update_task_status(video_id, "failed", error=str(e))
+        
+        import threading
+        thread = threading.Thread(target=background_s3_processing)
+        thread.start()
+        
+        return jsonify({
+            "video_id": video_id,
+            "status": "processing",
+            "message": "Video processing started from S3"
+        }), 201
 
     except Exception as e:
         print(f"❌ S3 processing error: {e}")
@@ -833,8 +579,7 @@ def get_video_status(video_id):
             "updated_at": task.get("processing_end", task.get("updated_at")),
             "size": task.get("size", 0),
             "user_id": task.get("user_id", ""),
-            "user_email": task.get("user_email", ""),
-            "progress_percentage": task.get("progress_percentage", 0.0)
+            "user_email": task.get("user_email", "")
         }
         
         # Add error details if processing failed
@@ -846,7 +591,6 @@ def get_video_status(video_id):
             status_response["pdf_url"] = task["pdf_url"]
             status_response["pdf_ready"] = True
             status_response["download_url"] = f"/download/{video_id}.pdf"
-            status_response["progress_percentage"] = 100.0
         else:
             status_response["pdf_ready"] = False
         
@@ -855,40 +599,27 @@ def get_video_status(video_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/')
-def api_root():
-    """Root endpoint - redirects to Swagger documentation"""
-    from flask import redirect
-    return redirect('/swagger/')
-
-@api.route('/info')
-class APIInfo(Resource):
-    @api.doc('api_info')
-    def get(self):
-        """API information and statistics"""
-        return {
-            "service": "Thakii Worker Service API",
-            "version": "1.0",
-            "description": "Video processing API for converting lectures to PDF transcripts",
-            "swagger_ui": "/swagger/",
-            "endpoints": {
-                "GET /api/v1/health/": "Service health check",
-                "POST /api/v1/videos/upload": "Upload video metadata (requires user_id)",
-                "GET /api/v1/videos/list": "List all uploaded videos",
-                "POST /api/v1/videos/generate-pdf": "Upload video file and start PDF generation",
-                "GET /swagger/": "Interactive API documentation"
-            },
-            "documentation": "All endpoints work without authentication",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "total_videos": len(tasks_storage),
-            "features": [
-                "Real-time video processing",
-                "Whisper AI speech recognition",
-                "PDF transcript generation",
-                "S3 cloud storage integration",
-                "RESTful API with Swagger documentation"
-            ]
-        }
+@app.route('/', methods=['GET'])
+def api_info():
+    """API information endpoint"""
+    return jsonify({
+        "service": "Thakii Worker Service API",
+        "version": "1.0",
+        "endpoints": {
+            "GET /health": "Service health check",
+            "POST /upload": "Upload video metadata (requires user_id)",
+            "GET /list": "List all uploaded videos",
+            "GET /list/<user_id>": "List videos for specific user",
+            "POST /process/<video_id>": "Process specific video",
+            "GET /status/<video_id>": "Get video processing status",
+            "GET /download/<video_id>.pdf": "Download any PDF (generic)",
+            "GET /download/<user_id>/<video_id>.pdf": "Download PDF for specific user",
+            "POST /generate-pdf": "Upload video file and start PDF generation"
+        },
+        "documentation": "All endpoints work without authentication",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "total_videos": len(tasks_storage)
+    })
 
 @app.errorhandler(404)
 def not_found(error):
