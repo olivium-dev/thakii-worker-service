@@ -132,7 +132,7 @@ class EnhancedWorkerAPI:
             video_path = task_dir / f"{video_id}.mp4"
             print(f"📥 Downloading video from S3: {s3_key}", flush=True)
             
-            if not self.s3.download_file(s3_key, video_path):
+            if not self.s3.download_video(video_id, str(video_path), s3_key):
                 raise Exception(f"Failed to download video from S3: {s3_key}")
             
             # Generate PDF
