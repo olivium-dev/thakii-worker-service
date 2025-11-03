@@ -75,7 +75,7 @@ class EnhancedWorker:
         print(f"   ⚠️  Using system temp (fallback): {system_temp}", flush=True)
         return str(system_temp)
     
-    def process_video(self, video_id: str, s3_key: str = None, filename: str = None) -> bool:
+    def process_video(self, video_id: str, s3_key: str = None, filename: str = None, task_details: dict = None) -> bool:
         print(f"\n🎯 Processing: {video_id}", flush=True)
         if s3_key:
             print(f"   🔑 S3 Key: {s3_key}", flush=True)
@@ -89,14 +89,17 @@ class EnhancedWorker:
             else:
                 self.postgres.update_task_status(video_id, "processing")
             
-            # Get task details
-            task = self.postgres.get_task_details(video_id)
-            if not task:
-                if self.api.is_enabled:
-                    self.api.update_task_status(video_id, "failed", error_message="Task not found")
-                else:
-                    self.postgres.update_task_status(video_id, "failed", error_message="Task not found")
-                return False
+            # Get task details (use provided details from API pickup, or fallback to PostgreSQL)
+            if task_details:
+                task = task_details
+            else:
+                task = self.postgres.get_task_details(video_id)
+                if not task:
+                    if self.api.is_enabled:
+                        self.api.update_task_status(video_id, "failed", error_message="Task not found")
+                    else:
+                        self.postgres.update_task_status(video_id, "failed", error_message="Task not found")
+                    return False
             
             # Prefer parameters, then task fields, then fallback
             filename = filename or task.get('filename', f'{video_id}.mp4')
@@ -211,9 +214,9 @@ class EnhancedWorker:
                             print(f"✅ Picked up task via API: {video_id}", flush=True)
                             active_tasks.add(video_id)
                             
-                            # Process with timeout protection
+                            # Process with timeout protection, passing task details
                             try:
-                                future = self.executor.submit(self.process_video, video_id)
+                                future = self.executor.submit(self.process_video, video_id, task_details=task)
                                 future.add_done_callback(lambda f, vid=video_id: active_tasks.discard(vid))
                             except Exception as e:
                                 print(f"❌ Failed to submit task {video_id}: {e}", flush=True)
