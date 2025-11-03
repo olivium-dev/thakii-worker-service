@@ -166,7 +166,8 @@ class APITaskClient:
                 if response.status_code == 200:
                     data = response.json()
                     if data.get('success'):
-                        print(f"✅ Updated task {video_id} to {status} via API")
+                        progress_msg = f" (progress: {update_data.get('progress', 'N/A')}%)" if 'progress' in update_data else ""
+                        print(f"✅ Updated task {video_id} to {status} via API{progress_msg}", flush=True)
                         
                         # Remove from active tasks if completed or failed
                         if status in ['completed', 'done', 'failed']:
