@@ -87,7 +87,7 @@ class EnhancedWorker:
             if self.api.is_enabled:
                 self.api.update_task_status(video_id, "processing", progress=0)
             else:
-                self.postgres.update_task_status(video_id, "processing", progress_percentage=0.0)
+                self.postgres.update_task_status(video_id, "processing")
             
             # Get task details
             task = self.postgres.get_task_details(video_id)
@@ -115,7 +115,7 @@ class EnhancedWorker:
                 if self.api.is_enabled:
                     self.api.update_task_status(video_id, "processing", progress=10)
                 else:
-                    self.postgres.update_task_status(video_id, "processing", progress_percentage=10.0)
+                    self.postgres.update_task_status(video_id, "processing")
                 
                 # Download video (use exact s3_key if available)
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
@@ -129,7 +129,7 @@ class EnhancedWorker:
                 if self.api.is_enabled:
                     self.api.update_task_status(video_id, "processing", progress=30)
                 else:
-                    self.postgres.update_task_status(video_id, "processing", progress_percentage=30.0)
+                    self.postgres.update_task_status(video_id, "processing")
                 
                 # Generate PDF with superior algorithms
                 if not self._generate_superior_pdf(video_path, pdf_path):
@@ -143,7 +143,7 @@ class EnhancedWorker:
                 if self.api.is_enabled:
                     self.api.update_task_status(video_id, "processing", progress=80)
                 else:
-                    self.postgres.update_task_status(video_id, "processing", progress_percentage=80.0)
+                    self.postgres.update_task_status(video_id, "processing")
                 
                 # Upload PDF
                 pdf_url = self.s3.upload_pdf(str(pdf_path), video_id)
@@ -158,7 +158,7 @@ class EnhancedWorker:
                 if self.api.is_enabled:
                     self.api.update_task_status(video_id, "done", pdf_url=pdf_url, progress=100)
                 else:
-                    self.postgres.update_task_status(video_id, "done", pdf_url=pdf_url, progress_percentage=100.0)
+                    self.postgres.update_task_status(video_id, "done", pdf_url=pdf_url)
                 print(f"🎉 Success: {video_id}")
                 return True
                 
