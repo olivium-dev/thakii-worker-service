@@ -74,6 +74,7 @@ class APITaskClient:
         # Try to pick up a task with retries
         for attempt in range(MAX_RETRIES):
             try:
+                print(f"🔄 Attempting to pickup task via API (attempt {attempt+1}/{MAX_RETRIES})...", flush=True)
                 response = self.session.post(
                     f"{self.backend_url}/internal/worker/pickup-task",
                     json={
@@ -83,8 +84,11 @@ class APITaskClient:
                     timeout=REQUEST_TIMEOUT
                 )
                 
+                print(f"📡 API Response: {response.status_code}", flush=True)
+                
                 # No content means no tasks available
                 if response.status_code == 204:
+                    print("⏳ No tasks available (204)", flush=True)
                     return None
                 
                 # Check for successful response
@@ -97,16 +101,18 @@ class APITaskClient:
                         # Track this task
                         self.active_tasks.add(video_id)
                         
-                        print(f"✅ Picked up task {video_id} via API")
+                        print(f"✅ Picked up task {video_id} via API", flush=True)
                         return task
                 
                 # Handle error
-                print(f"❌ Failed to pick up task (attempt {attempt+1}/{MAX_RETRIES})")
-                print(f"   Status code: {response.status_code}")
-                print(f"   Response: {response.text}")
+                print(f"❌ Failed to pick up task (attempt {attempt+1}/{MAX_RETRIES})", flush=True)
+                print(f"   Status code: {response.status_code}", flush=True)
+                print(f"   Response: {response.text}", flush=True)
                 
             except Exception as e:
-                print(f"❌ Error picking up task (attempt {attempt+1}/{MAX_RETRIES}): {e}")
+                print(f"❌ Error picking up task (attempt {attempt+1}/{MAX_RETRIES}): {e}", flush=True)
+                import traceback
+                traceback.print_exc()
             
             # Wait before retry
             if attempt < MAX_RETRIES - 1:
