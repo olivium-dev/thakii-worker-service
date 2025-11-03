@@ -21,11 +21,13 @@ import signal
 # Import core integrations
 from core.postgres_integration import postgres_client
 from core.s3_integration import s3_client
+from core.api_task_client import api_client
 
 class EnhancedWorker:
     def __init__(self):
         self.postgres = postgres_client
         self.s3 = s3_client
+        self.api = api_client
         
         # Mac Mini M2 Optimization: Use multiple cores efficiently
         self.max_concurrent_tasks = int(os.getenv('MAX_CONCURRENT_TASKS', min(multiprocessing.cpu_count(), 3)))
@@ -38,6 +40,7 @@ class EnhancedWorker:
         self.task_timeout = 1800
         
         print("🚀 Mac Mini M2 Optimized Worker", flush=True)
+        print(f"   API Client: {'✅' if self.api.is_enabled else '❌'}", flush=True)
         print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}", flush=True)
         print(f"   S3: {'✅' if self.s3.is_available() else '❌'}", flush=True)
         print(f"   Temp Storage: {self.temp_base_dir}", flush=True)
@@ -81,12 +84,18 @@ class EnhancedWorker:
         
         try:
             # Update to processing with 0% progress
-            self.postgres.update_task_status(video_id, "processing", progress_percentage=0.0)
+            if self.api.is_enabled:
+                self.api.update_task_status(video_id, "processing", progress=0)
+            else:
+                self.postgres.update_task_status(video_id, "processing", progress_percentage=0.0)
             
             # Get task details
             task = self.postgres.get_task_details(video_id)
             if not task:
-                self.postgres.update_task_status(video_id, "failed", error_message="Task not found")
+                if self.api.is_enabled:
+                    self.api.update_task_status(video_id, "failed", error_message="Task not found")
+                else:
+                    self.postgres.update_task_status(video_id, "failed", error_message="Task not found")
                 return False
             
             # Prefer parameters, then task fields, then fallback
@@ -103,37 +112,61 @@ class EnhancedWorker:
                 sys.stdout.flush()
                 
                 # Update progress to 10% - Starting download
-                self.postgres.update_task_status(video_id, "processing", progress_percentage=10.0)
+                if self.api.is_enabled:
+                    self.api.update_task_status(video_id, "processing", progress=10)
+                else:
+                    self.postgres.update_task_status(video_id, "processing", progress_percentage=10.0)
                 
                 # Download video (use exact s3_key if available)
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
-                    self.postgres.update_task_status(video_id, "failed", error_message="Download failed")
+                    if self.api.is_enabled:
+                        self.api.update_task_status(video_id, "failed", error_message="Download failed")
+                    else:
+                        self.postgres.update_task_status(video_id, "failed", error_message="Download failed")
                     return False
                 
                 # Update progress to 30% - Download complete, starting PDF generation
-                self.postgres.update_task_status(video_id, "processing", progress_percentage=30.0)
+                if self.api.is_enabled:
+                    self.api.update_task_status(video_id, "processing", progress=30)
+                else:
+                    self.postgres.update_task_status(video_id, "processing", progress_percentage=30.0)
                 
                 # Generate PDF with superior algorithms
                 if not self._generate_superior_pdf(video_path, pdf_path):
-                    self.postgres.update_task_status(video_id, "failed", error_message="PDF generation failed")
+                    if self.api.is_enabled:
+                        self.api.update_task_status(video_id, "failed", error_message="PDF generation failed")
+                    else:
+                        self.postgres.update_task_status(video_id, "failed", error_message="PDF generation failed")
                     return False
                 
                 # Update progress to 80% - PDF generated, starting upload
-                self.postgres.update_task_status(video_id, "processing", progress_percentage=80.0)
+                if self.api.is_enabled:
+                    self.api.update_task_status(video_id, "processing", progress=80)
+                else:
+                    self.postgres.update_task_status(video_id, "processing", progress_percentage=80.0)
                 
                 # Upload PDF
                 pdf_url = self.s3.upload_pdf(str(pdf_path), video_id)
                 if not pdf_url:
-                    self.postgres.update_task_status(video_id, "failed", error_message="Upload failed")
+                    if self.api.is_enabled:
+                        self.api.update_task_status(video_id, "failed", error_message="Upload failed")
+                    else:
+                        self.postgres.update_task_status(video_id, "failed", error_message="Upload failed")
                     return False
                 
                 # Mark completed with 100% progress
-                self.postgres.update_task_status(video_id, "done", pdf_url=pdf_url, progress_percentage=100.0)
+                if self.api.is_enabled:
+                    self.api.update_task_status(video_id, "done", pdf_url=pdf_url, progress=100)
+                else:
+                    self.postgres.update_task_status(video_id, "done", pdf_url=pdf_url, progress_percentage=100.0)
                 print(f"🎉 Success: {video_id}")
                 return True
                 
         except Exception as e:
-            self.postgres.update_task_status(video_id, "failed", error_message=str(e))
+            if self.api.is_enabled:
+                self.api.update_task_status(video_id, "failed", error_message=str(e))
+            else:
+                self.postgres.update_task_status(video_id, "failed", error_message=str(e))
             return False
     
     def _generate_superior_pdf(self, video_path: Path, pdf_path: Path) -> bool:
@@ -167,19 +200,18 @@ class EnhancedWorker:
         
         while True:
             try:
-                # Get pending tasks with timeout protection
-                pending_tasks = self.postgres.get_pending_tasks(limit=self.max_concurrent_tasks * 2)
-                
-                if pending_tasks:
-                    print(f"📋 Found {len(pending_tasks)} pending tasks", flush=True)
-                    
-                    for task in pending_tasks:
-                        video_id = task.get('video_id')
-                        if video_id and video_id not in active_tasks:
-                            # Track active task to prevent duplicate processing
+                # Use API pickup if enabled, otherwise use direct PostgreSQL
+                if self.api.is_enabled:
+                    # Check if we have capacity
+                    if len(active_tasks) < self.max_concurrent_tasks:
+                        # Try to pick up one task via API
+                        task = self.api.pickup_task()
+                        if task:
+                            video_id = task.get('video_id')
+                            print(f"✅ Picked up task via API: {video_id}", flush=True)
                             active_tasks.add(video_id)
                             
-                            # Process with timeout protection - no hanging
+                            # Process with timeout protection
                             try:
                                 future = self.executor.submit(self.process_video, video_id)
                                 future.add_done_callback(lambda f, vid=video_id: active_tasks.discard(vid))
@@ -187,7 +219,27 @@ class EnhancedWorker:
                                 print(f"❌ Failed to submit task {video_id}: {e}", flush=True)
                                 active_tasks.discard(video_id)
                 else:
-                    print("⏳ No pending tasks...", flush=True)
+                    # Fallback to direct PostgreSQL polling
+                    pending_tasks = self.postgres.get_pending_tasks(limit=self.max_concurrent_tasks * 2)
+                    
+                    if pending_tasks:
+                        print(f"📋 Found {len(pending_tasks)} pending tasks", flush=True)
+                        
+                        for task in pending_tasks:
+                            video_id = task.get('video_id')
+                            if video_id and video_id not in active_tasks:
+                                # Track active task to prevent duplicate processing
+                                active_tasks.add(video_id)
+                                
+                                # Process with timeout protection - no hanging
+                                try:
+                                    future = self.executor.submit(self.process_video, video_id)
+                                    future.add_done_callback(lambda f, vid=video_id: active_tasks.discard(vid))
+                                except Exception as e:
+                                    print(f"❌ Failed to submit task {video_id}: {e}", flush=True)
+                                    active_tasks.discard(video_id)
+                    else:
+                        print("⏳ No pending tasks...", flush=True)
                 
                 # Clean up completed/failed tasks from tracking
                 time.sleep(poll_interval)
