@@ -205,22 +205,29 @@ class EnhancedWorker:
             try:
                 # Use API pickup if enabled, otherwise use direct PostgreSQL
                 if self.api.is_enabled:
-                    # Check if we have capacity
-                    if len(active_tasks) < self.max_concurrent_tasks:
-                        # Try to pick up one task via API
+                    # BATCH PICKUP: Fill capacity in one cycle for 4x performance
+                    tasks_picked = 0
+                    while len(active_tasks) < self.max_concurrent_tasks:
+                        # Try to pick up tasks until at capacity
                         task = self.api.pickup_task()
-                        if task:
-                            video_id = task.get('video_id')
-                            print(f"✅ Picked up task via API: {video_id}", flush=True)
-                            active_tasks.add(video_id)
-                            
-                            # Process with timeout protection, passing task details
-                            try:
-                                future = self.executor.submit(self.process_video, video_id, task_details=task)
-                                future.add_done_callback(lambda f, vid=video_id: active_tasks.discard(vid))
-                            except Exception as e:
-                                print(f"❌ Failed to submit task {video_id}: {e}", flush=True)
-                                active_tasks.discard(video_id)
+                        if not task:
+                            break  # No more tasks available
+                        
+                        video_id = task.get('video_id')
+                        tasks_picked += 1
+                        print(f"✅ Picked up task {tasks_picked}/{self.max_concurrent_tasks}: {video_id}", flush=True)
+                        active_tasks.add(video_id)
+                        
+                        # Process with timeout protection, passing task details
+                        try:
+                            future = self.executor.submit(self.process_video, video_id, task_details=task)
+                            future.add_done_callback(lambda f, vid=video_id: active_tasks.discard(vid))
+                        except Exception as e:
+                            print(f"❌ Failed to submit task {video_id}: {e}", flush=True)
+                            active_tasks.discard(video_id)
+                    
+                    if tasks_picked > 0:
+                        print(f"📊 Batch pickup complete: {tasks_picked} tasks, {len(active_tasks)} now active", flush=True)
                 else:
                     # Fallback to direct PostgreSQL polling
                     pending_tasks = self.postgres.get_pending_tasks(limit=self.max_concurrent_tasks * 2)
