@@ -250,3 +250,4 @@ class DebugVideoSegmentFinder:
 if __name__ == "__main__":
     finder = DebugVideoSegmentFinder()
     result = finder.get_best_segment_frames("/path/to/test/video.mp4")
+

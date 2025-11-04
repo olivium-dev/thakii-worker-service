@@ -83,6 +83,12 @@ class EnhancedWorker:
             print(f"   📁 Filename: {filename}")
         
         try:
+            # Check if cancelled before starting
+            if self._is_cancelled(video_id):
+                print(f"⚠️ Video {video_id} was cancelled before processing", flush=True)
+                self._handle_cancellation(video_id)
+                return False
+            
             # Update to processing with 0% progress
             if self.api.is_enabled:
                 self.api.update_task_status(video_id, "processing", progress=0)
@@ -114,6 +120,11 @@ class EnhancedWorker:
                 print(f"   📁 Using temp directory: {temp_dir}", flush=True)
                 sys.stdout.flush()
                 
+                # Check cancellation before download
+                if self._is_cancelled(video_id):
+                    self._handle_cancellation(video_id)
+                    return False
+                
                 # Update progress to 10% - Starting download
                 if self.api.is_enabled:
                     self.api.update_task_status(video_id, "processing", progress=10)
@@ -128,6 +139,11 @@ class EnhancedWorker:
                         self.postgres.update_task_status(video_id, "failed", error_message="Download failed")
                     return False
                 
+                # Check cancellation after download
+                if self._is_cancelled(video_id):
+                    self._handle_cancellation(video_id)
+                    return False
+                
                 # Update progress to 30% - Download complete, starting PDF generation
                 if self.api.is_enabled:
                     self.api.update_task_status(video_id, "processing", progress=30)
@@ -135,11 +151,20 @@ class EnhancedWorker:
                     self.postgres.update_task_status(video_id, "processing")
                 
                 # Generate PDF with superior algorithms
-                if not self._generate_superior_pdf(video_path, pdf_path):
-                    if self.api.is_enabled:
-                        self.api.update_task_status(video_id, "failed", error_message="PDF generation failed")
+                if not self._generate_pdf_with_cancellation_check(video_id, video_path, pdf_path):
+                    # Check if it was cancelled or failed
+                    if self._is_cancelled(video_id):
+                        self._handle_cancellation(video_id)
                     else:
-                        self.postgres.update_task_status(video_id, "failed", error_message="PDF generation failed")
+                        if self.api.is_enabled:
+                            self.api.update_task_status(video_id, "failed", error_message="PDF generation failed")
+                        else:
+                            self.postgres.update_task_status(video_id, "failed", error_message="PDF generation failed")
+                    return False
+                
+                # Check cancellation before upload
+                if self._is_cancelled(video_id):
+                    self._handle_cancellation(video_id)
                     return False
                 
                 # Update progress to 80% - PDF generated, starting upload
@@ -155,6 +180,16 @@ class EnhancedWorker:
                         self.api.update_task_status(video_id, "failed", error_message="Upload failed")
                     else:
                         self.postgres.update_task_status(video_id, "failed", error_message="Upload failed")
+                    return False
+                
+                # Final cancellation check
+                if self._is_cancelled(video_id):
+                    # Clean up uploaded PDF
+                    try:
+                        self.s3.delete_file(f"pdfs/{video_id}.pdf")
+                    except:
+                        pass
+                    self._handle_cancellation(video_id)
                     return False
                 
                 # Mark completed with 100% progress
@@ -261,6 +296,76 @@ class EnhancedWorker:
             except Exception as e:
                 print(f"💥 Polling error (will retry): {e}", flush=True)
                 time.sleep(30)  # Back off on errors
+    
+    def _is_cancelled(self, video_id: str) -> bool:
+        """Check if video has been cancelled"""
+        try:
+            if self.api.is_enabled:
+                # Check via API
+                response = self.api.check_cancellation(video_id)
+                return response.get('cancellation_requested', False) or response.get('cancelled', False)
+            else:
+                # Check directly in database
+                task = self.postgres.get_task_details(video_id)
+                return task.get('cancelled', False) if task else False
+        except Exception as e:
+            print(f"⚠️ Error checking cancellation for {video_id}: {e}")
+            return False
+
+    def _handle_cancellation(self, video_id: str):
+        """Handle cancelled video cleanup"""
+        print(f"🚫 Video {video_id} has been cancelled", flush=True)
+        
+        try:
+            if self.api.is_enabled:
+                # Complete cancellation via API
+                self.api.complete_cancellation(video_id)
+            else:
+                # Update directly in database
+                self.postgres.update_task_status(video_id, 'cancelled')
+        except Exception as e:
+            print(f"⚠️ Error completing cancellation for {video_id}: {e}")
+        
+        # Remove from active tasks if tracking
+        if hasattr(self, 'active_tasks'):
+            self.active_tasks.discard(video_id)
+
+    def _generate_pdf_with_cancellation_check(self, video_id: str, video_path: Path, pdf_path: Path) -> bool:
+        """Generate PDF with periodic cancellation checks"""
+        import subprocess
+        import sys
+        
+        try:
+            # Start PDF generation process
+            process = subprocess.Popen([
+                sys.executable, "-m", "src.main",
+                str(video_path), "-o", str(pdf_path)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=Path(__file__).parent)
+            
+            # Poll process and check for cancellation every 2 seconds
+            while process.poll() is None:
+                if self._is_cancelled(video_id):
+                    print(f"🚫 Cancelling PDF generation for {video_id}", flush=True)
+                    process.terminate()
+                    time.sleep(1)
+                    if process.poll() is None:
+                        process.kill()
+                    return False
+                time.sleep(2)  # Check every 2 seconds
+            
+            # Check final result
+            if process.returncode == 0 and pdf_path.exists():
+                return True
+            else:
+                print(f"❌ PDF generation failed with return code: {process.returncode}")
+                if process.stderr:
+                    stderr_output = process.stderr.read().decode()
+                    print(f"   Error output: {stderr_output}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error in PDF generation with cancellation check: {e}")
+            return False
 
 def main():
     worker = EnhancedWorker()

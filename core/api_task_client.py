@@ -189,6 +189,82 @@ class APITaskClient:
         
         return False
     
+    def check_cancellation(self, video_id: str) -> Dict[str, Any]:
+        """
+        Check if video cancellation is requested
+        
+        Args:
+            video_id: ID of the video to check
+            
+        Returns:
+            Dict with cancellation status information
+        """
+        if not self.is_enabled:
+            print("⚠️ Worker API is disabled. Cannot check cancellation via API.")
+            return {"cancelled": False, "cancellation_requested": False}
+        
+        try:
+            response = self.session.get(
+                f"{self.backend_url}/internal/worker/check-cancellation/{video_id}",
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "cancelled": data.get("cancelled", False),
+                    "cancellation_requested": data.get("cancellation_requested", False),
+                    "status": data.get("status"),
+                    "cancellation_reason": data.get("cancellation_reason")
+                }
+            elif response.status_code == 404:
+                print(f"⚠️ Video {video_id} not found when checking cancellation")
+                return {"cancelled": False, "cancellation_requested": False}
+            else:
+                print(f"❌ Failed to check cancellation for {video_id}: {response.status_code}")
+                return {"cancelled": False, "cancellation_requested": False}
+                
+        except Exception as e:
+            print(f"❌ Error checking cancellation for {video_id}: {e}")
+            return {"cancelled": False, "cancellation_requested": False}
+    
+    def complete_cancellation(self, video_id: str) -> bool:
+        """
+        Complete video cancellation (called by worker when stopping processing)
+        
+        Args:
+            video_id: ID of the video to complete cancellation for
+            
+        Returns:
+            bool: Success or failure
+        """
+        if not self.is_enabled:
+            print("⚠️ Worker API is disabled. Cannot complete cancellation via API.")
+            return False
+        
+        try:
+            response = self.session.post(
+                f"{self.backend_url}/internal/worker/complete-cancellation/{video_id}",
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('success'):
+                    print(f"✅ Completed cancellation for {video_id} via API", flush=True)
+                    
+                    # Remove from active tasks
+                    self.active_tasks.discard(video_id)
+                    
+                    return True
+            
+            print(f"❌ Failed to complete cancellation for {video_id}: {response.status_code}")
+            return False
+                
+        except Exception as e:
+            print(f"❌ Error completing cancellation for {video_id}: {e}")
+            return False
+    
     def send_heartbeat(self) -> bool:
         """
         Send heartbeat to backend

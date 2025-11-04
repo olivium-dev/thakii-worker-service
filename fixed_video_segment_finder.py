@@ -229,3 +229,4 @@ class VideoSegmentFinder:
 if __name__ == "__main__":
     splitter = VideoSegmentFinder()
     splitter.get_best_segment_frames("../tests/videos/input_2.mp4")
+

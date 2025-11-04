@@ -1,0 +1,105 @@
+name: Deploy Worker API
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'worker_api.py'
+      - 'core/api_task_client.py'
+      - 'com.thakii.worker_api.plist'
+      - 'scripts/deploy_worker_api.sh'
+      - '.github/workflows/deploy-worker-api.yml'
+  workflow_dispatch:
+    inputs:
+      enable_worker_api:
+        description: 'Enable Worker API (true/false)'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      
+      - name: Setup SSH tunnel
+        run: |
+          # Start cloudflared tunnel in background using the command from the terminal
+          nohup cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2222 &
+          # Wait for tunnel to start
+          sleep 10
+      
+      - name: Deploy to thakii-03
+        run: |
+          echo "Deploying to thakii-03..."
+          
+          # Create deployment package
+          mkdir -p deploy
+          cp -r worker_api.py core scripts com.thakii.worker_api.plist requirements.txt deploy/
+          
+          # Create archive
+          tar -czf worker-api-deploy.tar.gz -C deploy .
+          
+          # Copy to server
+          sshpass -p "12344321" scp -o StrictHostKeyChecking=no -P 2222 worker-api-deploy.tar.gz fanusdigital@localhost:~/Desktop/
+          
+          # Extract and deploy on server
+          sshpass -p "12344321" ssh -o StrictHostKeyChecking=no -p 2222 fanusdigital@localhost << 'EOF'
+            cd ~/Desktop/thakii-worker-service
+            
+            # Backup existing files
+            mkdir -p backup-$(date +%Y%m%d)
+            cp -r worker_api.py core scripts com.thakii.worker_api.plist backup-$(date +%Y%m%d)/ 2>/dev/null || true
+            
+            # Extract deployment package
+            tar -xzf ~/Desktop/worker-api-deploy.tar.gz
+            
+            # Update .env file with feature flag
+            if [ -f .env ]; then
+              if grep -q "ENABLE_WORKER_API" .env; then
+                sed -i '' "s/ENABLE_WORKER_API=.*/ENABLE_WORKER_API=${{ github.event.inputs.enable_worker_api || 'false' }}/" .env
+              else
+                echo "ENABLE_WORKER_API=${{ github.event.inputs.enable_worker_api || 'false' }}" >> .env
+              fi
+            else
+              echo "ENABLE_WORKER_API=${{ github.event.inputs.enable_worker_api || 'false' }}" > .env
+            fi
+            
+            # Make scripts executable
+            chmod +x scripts/*.sh
+            
+            # Run deployment script
+            ./scripts/deploy_worker_api.sh
+            
+            # Clean up
+            rm ~/Desktop/worker-api-deploy.tar.gz
+          EOF
+      
+      - name: Verify deployment
+        run: |
+          echo "Verifying deployment..."
+          sshpass -p "12344321" ssh -o StrictHostKeyChecking=no -p 2222 fanusdigital@localhost << 'EOF'
+            # Check if service is running
+            launchctl list | grep com.thakii.worker_api
+            
+            # Check logs
+            if [ -f ~/Desktop/thakii-worker-service/logs/worker_api.log ]; then
+              echo "Last 10 lines of worker_api.log:"
+              tail -n 10 ~/Desktop/thakii-worker-service/logs/worker_api.log
+            else
+              echo "Log file not found!"
+            fi
+            
+            # Check environment
+            echo "Worker API enabled: $(grep ENABLE_WORKER_API ~/Desktop/thakii-worker-service/.env || echo 'Not found')"
+          EOF
