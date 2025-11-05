@@ -50,8 +50,8 @@ class ContentSegmentPdfBuilder:
             
             font_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", f"{font_name}.ttf")
             if not os.path.exists(font_path):
-                print(f"⚠️ Font not found at {font_path}, using default font")
-                font_name = "Arial"  # Fallback to default
+                print(f"⚠️ Font not found at {font_path}, using default FPDF font")
+                font_name = "helvetica"  # Fallback to valid FPDF built-in font
             else:
                 pdf.add_font("CustomFont", "", font_path, uni=True)
                 font_name = "CustomFont"
@@ -73,9 +73,9 @@ class ContentSegmentPdfBuilder:
                     try:
                         pdf.set_font(font_name, "", font_size)
                     except:
-                        # Fallback to default font if custom font fails
-                        pdf.set_font("Arial", "", font_size)
-                        print(f"⚠️ Using fallback Arial font at {font_size}pt")
+                        # Fallback to default FPDF font if custom font fails
+                        pdf.set_font("helvetica", "", font_size)
+                        print(f"⚠️ Using fallback helvetica font at {font_size}pt")
                     pdf.multi_cell(0, 10, pages[i].text)
                 else:
                     print(f"⚠️ No text for page {i+1}: {repr(pages[i].text)}")
