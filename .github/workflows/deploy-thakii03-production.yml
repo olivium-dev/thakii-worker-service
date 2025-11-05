@@ -100,7 +100,7 @@ jobs:
         S3_BUCKET_NAME=thakii-video-storage-1753883631
         AWS_DEFAULT_REGION=us-east-2
         WORKER_POLL_INTERVAL=5
-        MAX_CONCURRENT_TASKS=4
+        MAX_CONCURRENT_TASKS=2
         TEMP_DIR=/tmp/thakii-worker
         PATH_PREFIX=/thakii-worker
         ENABLE_REDIS_QUEUE=false
