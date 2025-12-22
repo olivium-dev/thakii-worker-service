@@ -35,6 +35,8 @@
         <string>4</string>
         <key>WORKER_POLL_INTERVAL</key>
         <string>10</string>
+        <key>API_REAL_SAMPLE_MODE</key>
+        <string>true</string>
     </dict>
 </dict>
 </plist>

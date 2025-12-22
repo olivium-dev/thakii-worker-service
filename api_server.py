@@ -19,6 +19,10 @@ import sys
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
+# Configuration: Real Sample Mode for enhanced slide detection
+# API_REAL_SAMPLE_MODE=true (default): Use optimized algorithm with better slide detection
+# API_REAL_SAMPLE_MODE=false: Use original algorithm for backward compatibility
+
 try:
     from src.main import CommandLineArgRunner
     print("✅ Successfully imported src.main.CommandLineArgRunner")
@@ -58,11 +62,21 @@ def cleanup_local_files(video_id):
 def real_video_processing(video_id, video_path):
     """
     Real video processing function that runs in background
-    Integrates with actual src/main.py logic
+    Integrates with actual src/main.py logic with Real Sample Mode optimization
     """
     output_pdf = None
     try:
         print(f"🎬 Starting REAL processing for video {video_id}")
+        
+        # Configure Real Sample Mode for enhanced slide detection
+        enable_real_sample_mode = os.getenv('API_REAL_SAMPLE_MODE', 'true').lower() == 'true'
+        if enable_real_sample_mode:
+            os.environ['REAL_SAMPLE_MODE'] = 'true'
+            print(f"🚀 Real Sample Mode: ENABLED for enhanced slide detection")
+        else:
+            os.environ['REAL_SAMPLE_MODE'] = 'false'
+            print(f"📊 Real Sample Mode: DISABLED (using original algorithm)")
+        
         # Update status in Firebase
         try:
             postgres_client.update_task_status(video_id, "processing")
@@ -88,9 +102,11 @@ def real_video_processing(video_id, video_path):
             # Method 2: Direct subprocess call to src/main.py
             print(f"🔧 Using subprocess call to src/main.py")
             output_pdf = f"{video_id}.pdf"
+            # Pass environment variables to subprocess
+            env = os.environ.copy()
             result = subprocess.run([
                 sys.executable, '-m', 'src.main', str(video_path), '-o', output_pdf
-            ], capture_output=True, text=True, cwd=os.path.dirname(__file__))
+            ], capture_output=True, text=True, cwd=os.path.dirname(__file__), env=env)
             
             if result.returncode != 0:
                 raise Exception(f"Main process failed: {result.stderr}")
@@ -125,6 +141,7 @@ def real_video_processing(video_id, video_path):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint - no authentication required"""
+    real_sample_mode = os.getenv('API_REAL_SAMPLE_MODE', 'true').lower() == 'true'
     return jsonify({
         "database": "Local",
         "service": "Thakii Lecture2PDF Service",
@@ -132,6 +149,10 @@ def health_check():
         "storage": "Local",
         "timestamp": datetime.datetime.now().isoformat(),
         "api_version": "1.0",
+        "configuration": {
+            "real_sample_mode": real_sample_mode,
+            "algorithm": "Real Sample Optimized" if real_sample_mode else "Original"
+        },
         "endpoints": {
             "upload": "/upload",
             "list": "/list", 

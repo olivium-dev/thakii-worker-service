@@ -55,3 +55,7 @@ ENV/
 .coverage
 htmlcov/
 .pytest_cache/
+tests/videos/input_9.mp4
+tests/videos/input_10.mp4
+tests/videos/input_11.mp4
+test_api_quick.py
