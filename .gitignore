@@ -59,3 +59,7 @@ tests/videos/input_9.mp4
 tests/videos/input_10.mp4
 tests/videos/input_11.mp4
 test_api_quick.py
+test_generate_pdf_no_subs.py
+test_log_flow.py
+test_logging_system.py
+test_generate_pdf_input10.py
