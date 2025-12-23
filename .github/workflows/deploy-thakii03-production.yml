@@ -109,7 +109,7 @@ jobs:
         ENABLE_WORKER_API=true
         WORKER_ID=worker-thakii-03
         API_REAL_SAMPLE_MODE=false
-        LOGGING_ENABLED=true
+        LOGGING_ENABLED=false
         REAL_SAMPLE_MODE=false
         DOTENV
         
