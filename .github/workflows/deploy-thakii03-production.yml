@@ -108,6 +108,9 @@ jobs:
         REDIS_PORT=6379
         ENABLE_WORKER_API=true
         WORKER_ID=worker-thakii-03
+        API_REAL_SAMPLE_MODE=true
+        LOGGING_ENABLED=true
+        REAL_SAMPLE_MODE=true
         DOTENV
         
         # Start Cloudflare tunnel

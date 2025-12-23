@@ -68,3 +68,4 @@ test_production_download.py
 test_production_proper_workflow.py
 test_production_worker_api.py
 pull_logs.bat
+check_env_vars.py
