@@ -63,3 +63,8 @@ test_generate_pdf_no_subs.py
 test_log_flow.py
 test_logging_system.py
 test_generate_pdf_input10.py
+check_production_config.py
+test_production_download.py
+test_production_proper_workflow.py
+test_production_worker_api.py
+pull_logs.bat

@@ -37,6 +37,8 @@
         <string>10</string>
         <key>API_REAL_SAMPLE_MODE</key>
         <string>true</string>
+        <key>LOGGING_ENABLED</key>
+        <string>true</string>
     </dict>
 </dict>
 </plist>
