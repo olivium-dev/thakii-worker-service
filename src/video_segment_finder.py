@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import os
+import statistics
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -167,8 +168,6 @@ class VideoSegmentFinder:
         
         # Calculate adaptive thresholds
         if len(sample_changes_full) >= 5:
-            import statistics
-            
             # Full frame thresholds
             mean_full = statistics.mean(sample_changes_full)
             std_full = statistics.stdev(sample_changes_full) if len(sample_changes_full) > 1 else mean_full * 0.5
