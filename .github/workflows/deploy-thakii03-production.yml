@@ -1,12 +1,6 @@
 name: Deploy Thakii-03 Worker (Production)
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/deploy-thakii03-production.yml'
-      - 'TRIGGER_DEPLOY'
   workflow_dispatch:
 
 jobs:
