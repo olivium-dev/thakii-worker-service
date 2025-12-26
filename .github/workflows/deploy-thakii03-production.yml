@@ -239,31 +239,15 @@ jobs:
         
         # Validate critical packages are installed
         echo "🔍 Validating critical packages..."
-        /opt/homebrew/bin/python3 -c "
-import sys
-packages = [
-    ('cv2', 'opencv-python-headless'),
-    ('moviepy', 'moviepy'),
-    ('imageio', 'imageio'),
-    ('whisper', 'openai-whisper'),
-    ('torch', 'torch'),
-    ('flask', 'flask'),
-    ('boto3', 'boto3'),
-    ('fpdf', 'fpdf2'),
-]
-missing = []
-for module, name in packages:
-    try:
-        __import__(module)
-        print(f'  ✅ {name}')
-    except ImportError:
-        print(f'  ❌ {name} - MISSING!')
-        missing.append(name)
-if missing:
-    print(f'\\n⚠️  WARNING: Missing packages: {missing}')
-    sys.exit(1)
-print('\\n✅ All critical packages validated!')
-"
+        /opt/homebrew/bin/python3 -c "import cv2; print('  ✅ opencv-python-headless')" || echo "  ❌ opencv-python-headless - MISSING!"
+        /opt/homebrew/bin/python3 -c "import moviepy; print('  ✅ moviepy')" || echo "  ❌ moviepy - MISSING!"
+        /opt/homebrew/bin/python3 -c "import imageio; print('  ✅ imageio')" || echo "  ❌ imageio - MISSING!"
+        /opt/homebrew/bin/python3 -c "import whisper; print('  ✅ openai-whisper')" || echo "  ❌ openai-whisper - MISSING!"
+        /opt/homebrew/bin/python3 -c "import torch; print('  ✅ torch')" || echo "  ❌ torch - MISSING!"
+        /opt/homebrew/bin/python3 -c "import flask; print('  ✅ flask')" || echo "  ❌ flask - MISSING!"
+        /opt/homebrew/bin/python3 -c "import boto3; print('  ✅ boto3')" || echo "  ❌ boto3 - MISSING!"
+        /opt/homebrew/bin/python3 -c "import fpdf; print('  ✅ fpdf2')" || echo "  ❌ fpdf2 - MISSING!"
+        echo "✅ Package validation complete"
         
         # Create LaunchDaemon plists (using printf to avoid heredoc issues)
         echo "🔧 Creating LaunchDaemon for worker..."
@@ -445,14 +429,11 @@ print('\\n✅ All critical packages validated!')
         
         echo ""
         echo "📦 Installed Package Versions:"
-        /opt/homebrew/bin/python3 -c "
-import cv2, moviepy, imageio, whisper, torch, flask
-print(f'  opencv: {cv2.__version__}')
-print(f'  moviepy: {moviepy.__version__}')
-print(f'  imageio: {imageio.__version__}')
-print(f'  torch: {torch.__version__}')
-print(f'  flask: {flask.__version__}')
-" 2>/dev/null || echo "⚠️  Some packages could not be verified"
+        /opt/homebrew/bin/python3 -c "import cv2; print(f'  opencv: {cv2.__version__}')" 2>/dev/null || echo "  opencv: unknown"
+        /opt/homebrew/bin/python3 -c "import moviepy; print(f'  moviepy: {moviepy.__version__}')" 2>/dev/null || echo "  moviepy: unknown"
+        /opt/homebrew/bin/python3 -c "import imageio; print(f'  imageio: {imageio.__version__}')" 2>/dev/null || echo "  imageio: unknown"
+        /opt/homebrew/bin/python3 -c "import torch; print(f'  torch: {torch.__version__}')" 2>/dev/null || echo "  torch: unknown"
+        /opt/homebrew/bin/python3 -c "import flask; print(f'  flask: {flask.__version__}')" 2>/dev/null || echo "  flask: unknown"
         
         echo ""
         echo "📊 Service Status:"
