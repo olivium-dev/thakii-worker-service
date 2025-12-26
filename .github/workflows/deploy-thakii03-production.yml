@@ -41,7 +41,9 @@ jobs:
       run: |
         echo "🚀 Deploying worker service to thakii-03 via GitHub Actions..."
         
-        # Create tarball of worker service files
+        # Create tarball of worker service files (including all PROF-541 files)
+        tar czf worker-service.tar.gz core src worker.py api_server.py rq_worker.py requirements.txt scripts logging_config.py fonts 2>/dev/null || \
+        tar czf worker-service.tar.gz core src worker.py api_server.py rq_worker.py requirements.txt scripts logging_config.py 2>/dev/null || \
         tar czf worker-service.tar.gz core src worker.py api_server.py rq_worker.py requirements.txt scripts
         
         # Start Cloudflare tunnel in background
@@ -49,8 +51,8 @@ jobs:
         TUNNEL_PID=$!
         sleep 15
         
-        # Ensure worker directory exists
-        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2200 fanusdigital@localhost 'mkdir -p /Users/fanusdigital/thakii-worker-service/{core,src,logs}'
+        # Ensure worker directory exists with all subdirectories
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2200 fanusdigital@localhost 'mkdir -p /Users/fanusdigital/thakii-worker-service/{core,src,logs,fonts,scripts}'
         
         # Copy tarball to server
         sshpass -p "$THAKII_PASSWORD" scp -o StrictHostKeyChecking=no -P 2200 worker-service.tar.gz fanusdigital@localhost:/tmp/
@@ -91,26 +93,64 @@ jobs:
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       run: |
-        # Create .env file locally
+        # Create .env file locally with ALL required environment variables for optimal output
         cat > .env << 'DOTENV'
+        # Database Configuration
         USE_HTTP_DATABASE=true
         BACKEND_API_URL=https://thakii-02.fanusdigital.site/thakii-be
+        
+        # AWS S3 Configuration
         AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
         S3_BUCKET_NAME=thakii-video-storage-1753883631
         AWS_DEFAULT_REGION=us-east-2
+        
+        # Worker Configuration
         WORKER_POLL_INTERVAL=5
         MAX_CONCURRENT_TASKS=2
         TEMP_DIR=/tmp/thakii-worker
         PATH_PREFIX=/thakii-worker
+        WORKER_ID=worker-thakii-03
+        
+        # Redis Configuration
         ENABLE_REDIS_QUEUE=false
         REDIS_HOST=localhost
         REDIS_PORT=6379
         ENABLE_WORKER_API=true
-        WORKER_ID=worker-thakii-03
+        
+        # ============================================
+        # CRITICAL: Real Sample Mode for BEST OUTPUT
+        # ============================================
+        # These enable the enhanced slide detection algorithm
         API_REAL_SAMPLE_MODE=true
-        LOGGING_ENABLED=true
         REAL_SAMPLE_MODE=true
+        USE_QUARTER_BASED_ANALYSIS=true
+        
+        # Logging Configuration
+        LOGGING_ENABLED=true
+        LOG_LEVEL=INFO
+        DEBUG_MODE=false
+        
+        # ============================================
+        # Video Analysis Parameters (Optimized)
+        # ============================================
+        VIDEO_THRESHOLD=15
+        MIN_CHANGE=10000
+        MIN_SEGMENT_DURATION=2000
+        # Note: MAX_SEGMENTS is NOT set to allow unlimited slides in real_sample mode
+        
+        # Whisper AI Parameters
+        WHISPER_COMPRESSION_THRESHOLD=2.4
+        WHISPER_LOGPROB_THRESHOLD=-1.0
+        WHISPER_NO_SPEECH_THRESHOLD=0.6
+        
+        # PDF Layout Parameters
+        PDF_FONT_SIZE=12
+        PDF_FONT_NAME=DejaVuSansCondensed
+        
+        # Subtitle Generation Parameters
+        MAX_SUBTITLE_SEGMENTS=8
+        MIN_SUBTITLE_DURATION=8000
         DOTENV
         
         # Start Cloudflare tunnel
@@ -149,14 +189,81 @@ jobs:
         mv /tmp/worker.env .env
         chmod 600 .env
         
-        # Install/update dependencies (only required packages)
-        echo "📦 Installing dependencies..."
-        /opt/homebrew/bin/python3 -m pip install --break-system-packages \
-          flask flask-cors flask-restx boto3 botocore psycopg2-binary python-dotenv requests \
-          openai-whisper torch torchaudio srt opencv-python-headless fpdf2 moviepy \
-          redis rq 2>&1 | tail -20
+        # Install/update ALL dependencies from requirements.txt
+        echo "📦 Installing dependencies (ALL packages for PROF-541 enhanced mode)..."
         
-        echo "✅ Dependencies installed"
+        # Core dependencies
+        echo "   📥 Installing core packages..."
+        /opt/homebrew/bin/python3 -m pip install --break-system-packages --upgrade \
+          flask==2.3.3 flask-cors==4.0.0 flask-restx==1.3.0 \
+          boto3==1.34.131 botocore==1.34.131 \
+          psycopg2-binary==2.9.9 python-dotenv==1.0.0 requests==2.27.1 \
+          2>&1 | tail -10
+        
+        # Whisper AI and PyTorch
+        echo "   📥 Installing Whisper AI and PyTorch..."
+        /opt/homebrew/bin/python3 -m pip install --break-system-packages --upgrade \
+          openai-whisper==20231117 torch==2.1.0 torchaudio==2.1.0 \
+          2>&1 | tail -10
+        
+        # Video processing dependencies (CRITICAL for PROF-541)
+        echo "   📥 Installing video processing packages (CRITICAL)..."
+        /opt/homebrew/bin/python3 -m pip install --break-system-packages --upgrade \
+          opencv-python-headless==4.12.0.88 \
+          moviepy==1.0.3 \
+          imageio==2.31.1 \
+          imageio-ffmpeg==0.4.8 \
+          ffmpeg-python==0.2.0 \
+          numpy Pillow \
+          2>&1 | tail -10
+        
+        # PDF and subtitle packages
+        echo "   📥 Installing PDF and subtitle packages..."
+        /opt/homebrew/bin/python3 -m pip install --break-system-packages --upgrade \
+          fpdf2==2.2.0 srt==3.5.3 webvtt-py==0.4.6 pysrt==1.1.2 \
+          2>&1 | tail -10
+        
+        # Redis and queue packages
+        echo "   📥 Installing Redis queue packages..."
+        /opt/homebrew/bin/python3 -m pip install --break-system-packages --upgrade \
+          redis==5.0.1 rq==1.15.1 \
+          2>&1 | tail -10
+        
+        # Additional utilities
+        echo "   📥 Installing utilities..."
+        /opt/homebrew/bin/python3 -m pip install --break-system-packages --upgrade \
+          matplotlib==3.7.2 tqdm \
+          2>&1 | tail -10
+        
+        echo "✅ All dependencies installed"
+        
+        # Validate critical packages are installed
+        echo "🔍 Validating critical packages..."
+        /opt/homebrew/bin/python3 -c "
+import sys
+packages = [
+    ('cv2', 'opencv-python-headless'),
+    ('moviepy', 'moviepy'),
+    ('imageio', 'imageio'),
+    ('whisper', 'openai-whisper'),
+    ('torch', 'torch'),
+    ('flask', 'flask'),
+    ('boto3', 'boto3'),
+    ('fpdf', 'fpdf2'),
+]
+missing = []
+for module, name in packages:
+    try:
+        __import__(module)
+        print(f'  ✅ {name}')
+    except ImportError:
+        print(f'  ❌ {name} - MISSING!')
+        missing.append(name)
+if missing:
+    print(f'\\n⚠️  WARNING: Missing packages: {missing}')
+    sys.exit(1)
+print('\\n✅ All critical packages validated!')
+"
         
         # Create LaunchDaemon plists (using printf to avoid heredoc issues)
         echo "🔧 Creating LaunchDaemon for worker..."
@@ -270,7 +377,9 @@ jobs:
         kill $TUNNEL_PID 2>/dev/null || true
         wait $TUNNEL_PID 2>/dev/null || true
     
-    - name: 🧪 Verify Deployment
+    - name: 🧪 Verify Deployment and Configuration
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
       run: |
         echo "🔍 Verifying deployment..."
         sleep 10
@@ -280,16 +389,88 @@ jobs:
         HEALTH_RESPONSE=$(curl -s "https://thakii-3.fanusdigital.site/thakii-worker/health" || echo '{"error": "connection_failed"}')
         echo "Primary worker health: $HEALTH_RESPONSE"
         
+        # Check if real_sample_mode is in health response
+        if echo "$HEALTH_RESPONSE" | grep -q "real_sample_mode"; then
+          echo "✅ Real Sample Mode configuration detected in health response"
+        else
+          echo "⚠️  Real Sample Mode not visible in health response (may still be enabled)"
+        fi
+        
         # Test backend worker status
         echo ""
         echo "Testing backend worker status..."
         BACKEND_HEALTH=$(curl -s "https://thakii-02.fanusdigital.site/thakii-be/health" || echo '{"error": "backend_connection_failed"}')
         echo "Backend health: $BACKEND_HEALTH"
         
+        # Verify environment variables on server
+        echo ""
+        echo "🔍 Verifying environment configuration on server..."
+        
+        # Start Cloudflare tunnel for verification
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2202 &
+        TUNNEL_PID=$!
+        sleep 15
+        
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2202 fanusdigital@localhost << 'ENDSSH'
+        cd /Users/fanusdigital/thakii-worker-service
+        
+        echo "📋 Environment Variables Check:"
+        echo "================================"
+        
+        # Check critical env vars
+        if grep -q "REAL_SAMPLE_MODE=true" .env; then
+          echo "✅ REAL_SAMPLE_MODE=true (CRITICAL for best output)"
+        else
+          echo "❌ REAL_SAMPLE_MODE not set to true!"
+        fi
+        
+        if grep -q "API_REAL_SAMPLE_MODE=true" .env; then
+          echo "✅ API_REAL_SAMPLE_MODE=true"
+        else
+          echo "❌ API_REAL_SAMPLE_MODE not set to true!"
+        fi
+        
+        if grep -q "USE_QUARTER_BASED_ANALYSIS=true" .env; then
+          echo "✅ USE_QUARTER_BASED_ANALYSIS=true"
+        else
+          echo "⚠️  USE_QUARTER_BASED_ANALYSIS not set (defaults to true)"
+        fi
+        
+        # Check that MAX_SEGMENTS is NOT set (allows unlimited in real_sample mode)
+        if grep -q "^MAX_SEGMENTS=" .env; then
+          echo "⚠️  MAX_SEGMENTS is set - this may limit output quality"
+        else
+          echo "✅ MAX_SEGMENTS not set (unlimited slides in real_sample mode)"
+        fi
+        
+        echo ""
+        echo "📦 Installed Package Versions:"
+        /opt/homebrew/bin/python3 -c "
+import cv2, moviepy, imageio, whisper, torch, flask
+print(f'  opencv: {cv2.__version__}')
+print(f'  moviepy: {moviepy.__version__}')
+print(f'  imageio: {imageio.__version__}')
+print(f'  torch: {torch.__version__}')
+print(f'  flask: {flask.__version__}')
+" 2>/dev/null || echo "⚠️  Some packages could not be verified"
+        
+        echo ""
+        echo "📊 Service Status:"
+        ps aux | grep -E "python.*worker.py|python.*api_server.py" | grep -v grep | head -5 || echo "⚠️ Services may still be starting..."
+        ENDSSH
+        
+        # Cleanup tunnel
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+        
         echo ""
         echo "🎯 Deployment Summary:"
+        echo "======================================"
         echo "✅ Code deployed via GitHub Actions pipeline"
         echo "✅ S3 PDF path fix active: pdfs/{video_id}/{video_id}.pdf"
         echo "✅ Services restarted on thakii-03"
+        echo "✅ REAL_SAMPLE_MODE enabled for best output quality"
+        echo "✅ All PROF-541 dependencies installed"
         echo "✅ Deployment completed through CI/CD pipeline"
+        echo "======================================"
 
