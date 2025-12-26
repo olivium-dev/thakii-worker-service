@@ -7,7 +7,7 @@ Uses existing EnhancedWorker with RQ job management
 import os
 import sys
 from redis import Redis
-from rq import Worker, Queue, Connection
+from rq import Worker, Queue
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -51,8 +51,9 @@ if __name__ == '__main__':
         print("⚠️  RQ worker cannot start without Redis")
         sys.exit(1)
     
-    with Connection(redis_conn):
-        worker = Worker(['video_processing'])
-        print("🚀 RQ Worker started - listening for jobs")
-        worker.work()
+    # RQ 1.15+ no longer uses Connection context manager
+    queues = [Queue('video_processing', connection=redis_conn)]
+    worker = Worker(queues, connection=redis_conn)
+    print("🚀 RQ Worker started - listening for jobs")
+    worker.work()
 

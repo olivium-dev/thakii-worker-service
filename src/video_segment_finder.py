@@ -167,7 +167,7 @@ class VideoSegmentFinder:
             if sample_frame_num % sample_frame_skip == 0:
                 if sample_prev_frame is not None:
                     results = self.__compare_frames_center_focus__(sample_prev_frame, cur_frame)
-                    sample_changes.append(results["num_pixels_changed"])
+                    sample_changes.append(int(results["num_pixels_changed"]))
                 sample_prev_frame = cur_frame
                 
             sample_frame_num += 1
@@ -337,11 +337,11 @@ class VideoSegmentFinder:
                 if sample_prev_frame is not None:
                     # Full frame analysis
                     results_full = self.__compare_frames__(sample_prev_frame, cur_frame)
-                    sample_changes_full.append(results_full["num_pixels_changed"])
+                    sample_changes_full.append(int(results_full["num_pixels_changed"]))
                     
                     # Center-focused analysis
                     results_center = self.__compare_frames_center_focus__(sample_prev_frame, cur_frame)
-                    sample_changes_center.append(results_center["num_pixels_changed"])
+                    sample_changes_center.append(int(results_center["num_pixels_changed"]))
                     
                 sample_prev_frame = cur_frame
                 
