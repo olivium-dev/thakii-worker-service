@@ -298,16 +298,18 @@ class EnhancedWorker:
                 time.sleep(30)  # Back off on errors
     
     def _is_cancelled(self, video_id: str) -> bool:
-        """Check if video has been cancelled"""
+        """Check if video has been cancelled or cancellation is requested"""
         try:
             if self.api.is_enabled:
                 # Check via API
                 response = self.api.check_cancellation(video_id)
                 return response.get('cancellation_requested', False) or response.get('cancelled', False)
             else:
-                # Check directly in database
+                # Check directly in database - must check BOTH cancelled and cancellation_requested
                 task = self.postgres.get_task_details(video_id)
-                return task.get('cancelled', False) if task else False
+                if not task:
+                    return False
+                return task.get('cancelled', False) or task.get('cancellation_requested', False)
         except Exception as e:
             print(f"⚠️ Error checking cancellation for {video_id}: {e}")
             return False
