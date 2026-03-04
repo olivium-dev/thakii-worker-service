@@ -2,6 +2,15 @@ name: Check thakii-03 Worker Status
 
 on:
   workflow_dispatch:
+    inputs:
+      fix_nginx:
+        description: 'Also restart nginx to fix 502'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 jobs:
   check_status:
@@ -167,10 +176,68 @@ jobs:
         kill $TUNNEL_PID 2>/dev/null || true
         wait $TUNNEL_PID 2>/dev/null || true
 
+    - name: Fix nginx (restart it)
+      if: ${{ github.event.inputs.fix_nginx == 'true' }}
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2202 &
+        TUNNEL_PID=$!
+        sleep 15
+
+        echo "🔧 Restarting nginx on thakii-03..."
+
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2202 fanusdigital@localhost << 'ENDSSH'
+        echo "=== Current nginx status ==="
+        ps aux | grep nginx | grep -v grep || echo "⚠️ nginx is NOT running"
+        lsof -i :8080 2>/dev/null || echo "⚠️ Nothing on port 8080"
+
+        echo ""
+        echo "=== Checking nginx config ==="
+        cat /opt/homebrew/etc/nginx/nginx.conf 2>/dev/null | grep -B 2 -A 15 "thakii" || echo "Checking alternate path..."
+        cat /usr/local/etc/nginx/nginx.conf 2>/dev/null | grep -B 2 -A 15 "thakii" || echo "No thakii config found in nginx"
+
+        echo ""
+        echo "=== Restarting nginx ==="
+        brew services restart nginx 2>/dev/null || (echo "brew restart failed, trying launchctl..." && launchctl unload ~/Library/LaunchAgents/homebrew.mxcl.nginx.plist 2>/dev/null; launchctl load ~/Library/LaunchAgents/homebrew.mxcl.nginx.plist 2>/dev/null)
+
+        sleep 3
+
+        echo ""
+        echo "=== After restart ==="
+        ps aux | grep nginx | grep -v grep || echo "⚠️ nginx still not running!"
+        lsof -i :8080 2>/dev/null || echo "⚠️ Still nothing on port 8080"
+
+        echo ""
+        echo "=== Testing full chain ==="
+        echo "1. Direct Flask (port 8000):"
+        curl -s http://localhost:8000/health | head -5
+
+        echo ""
+        echo "2. Through nginx (port 8080, /thakii-worker prefix):"
+        curl -sv http://localhost:8080/thakii-worker/health 2>&1 | head -20
+
+        echo ""
+        echo "3. Through nginx (port 8080, root):"
+        curl -sv http://localhost:8080/ 2>&1 | head -10
+        ENDSSH
+
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+
     - name: Test Public Health Endpoint
       run: |
+        echo "=== Waiting 10s for services to stabilize ==="
+        sleep 10
+
         echo "=== Public Health Check ==="
-        curl -sv "https://thakii-3.fanusdigital.site/thakii-worker/health" 2>&1 || echo "Public endpoint unreachable"
-        echo ""
-        echo "=== Test without path prefix ==="
-        curl -sv "https://thakii-3.fanusdigital.site/health" 2>&1 || echo "Failed"
+        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "https://thakii-3.fanusdigital.site/thakii-worker/health")
+        echo "HTTP Status: $RESPONSE"
+
+        if [ "$RESPONSE" = "200" ]; then
+          echo "🎉 SUCCESS! Public endpoint is working!"
+          curl -s "https://thakii-3.fanusdigital.site/thakii-worker/health" | python3 -m json.tool
+        else
+          echo "⚠️ Still getting HTTP $RESPONSE"
+          curl -sv "https://thakii-3.fanusdigital.site/thakii-worker/health" 2>&1
+        fi
