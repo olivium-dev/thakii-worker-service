@@ -249,6 +249,16 @@ jobs:
         launchctl load ~/Library/LaunchAgents/com.thakii.rq_worker.plist
         launchctl start com.thakii.rq_worker || echo "⚠️ RQ worker failed to start (expected if Redis disabled)"
         
+        # Ensure nginx is running (proxies Cloudflare tunnel port 8080 → Flask port 8000)
+        echo "🔧 Ensuring nginx is running..."
+        if ! ps aux | grep "nginx: master" | grep -v grep > /dev/null 2>&1; then
+          echo "⚠️ nginx not running, fixing PID permissions and starting..."
+          rm -f /opt/homebrew/var/run/nginx.pid 2>/dev/null
+          /opt/homebrew/bin/nginx 2>&1 || echo "⚠️ nginx failed to start"
+        else
+          echo "✅ nginx already running"
+        fi
+        
         # Wait for services to start
         sleep 15
         
@@ -258,6 +268,9 @@ jobs:
         
         # Check if API server is listening on port 8000
         lsof -i :8000 || echo "⚠️ API server not listening on port 8000 yet"
+        
+        # Check if nginx is listening on port 8080
+        lsof -i :8080 || echo "⚠️ nginx not listening on port 8080"
         
         echo ""
         echo "✅ Deployment complete via GitHub Actions!"
