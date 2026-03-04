@@ -13,7 +13,7 @@ jobs:
         sudo dpkg -i cloudflared-linux-amd64.deb
         sudo apt-get update && sudo apt-get install -y sshpass
 
-    - name: Check Worker Status on thakii-03
+    - name: Deep Diagnostic on thakii-03
       env:
         THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
       run: |
@@ -21,9 +21,9 @@ jobs:
         TUNNEL_PID=$!
         sleep 15
 
-        echo "=============================="
-        echo "  THAKII-03 WORKER STATUS"
-        echo "=============================="
+        echo "============================================"
+        echo "  THAKII-03 DEEP DIAGNOSTIC (502 INVESTIGATION)"
+        echo "============================================"
 
         sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2201 fanusdigital@localhost << 'ENDSSH'
 
@@ -36,50 +36,132 @@ jobs:
         ps aux | grep -E "python.*(worker\.py|api_server\.py|rq_worker\.py)" | grep -v grep || echo "⚠️  No worker/api processes running"
 
         echo ""
-        echo "=== 3. Port 8000 ==="
+        echo "=== 3. Port 8000 (API server) ==="
         lsof -i :8000 2>/dev/null || echo "⚠️  Nothing listening on port 8000"
 
         echo ""
-        echo "=== 4. API health (localhost:8000/health) ==="
-        curl -sf http://localhost:8000/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "⚠️  API not responding"
+        echo "=== 4. API health (localhost) ==="
+        curl -sf http://localhost:8000/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "⚠️  API not responding on localhost:8000"
+        echo "--- Also test 127.0.0.1 ---"
+        curl -sf http://127.0.0.1:8000/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "⚠️  API not responding on 127.0.0.1:8000"
 
         echo ""
-        echo "=== 5. Deployment status (localhost:8000/status) ==="
-        curl -sf http://localhost:8000/status 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "⚠️  /status not available"
+        echo "=========================================="
+        echo "  CLOUDFLARE TUNNEL INVESTIGATION"
+        echo "=========================================="
 
         echo ""
-        echo "=== 6. Disk usage ==="
-        df -h / /tmp 2>/dev/null || df -h
+        echo "=== 5. cloudflared process ==="
+        ps aux | grep cloudflared | grep -v grep || echo "⚠️  cloudflared NOT running!"
 
         echo ""
-        echo "=== 7. Recent API server logs (last 30 lines) ==="
-        tail -30 ~/thakii-worker-service/logs/api_server.log 2>/dev/null || echo "No api_server.log found"
+        echo "=== 6. cloudflared service (launchctl) ==="
+        launchctl list | grep -i cloud || echo "No cloudflared LaunchAgent"
+        launchctl list | grep -i tunnel || echo "No tunnel LaunchAgent"
 
         echo ""
-        echo "=== 8. Recent API server errors ==="
-        tail -15 ~/thakii-worker-service/logs/api_server_error.log 2>/dev/null || echo "No error log"
+        echo "=== 7. cloudflared config files ==="
+        echo "--- /Users/fanusdigital/.cloudflared/ ---"
+        ls -la /Users/fanusdigital/.cloudflared/ 2>/dev/null || echo "No ~/.cloudflared/ directory"
+        echo ""
+        echo "--- config.yml ---"
+        cat /Users/fanusdigital/.cloudflared/config.yml 2>/dev/null || echo "No config.yml"
+        echo ""
+        echo "--- cert.pem exists? ---"
+        ls -la /Users/fanusdigital/.cloudflared/cert.pem 2>/dev/null || echo "No cert.pem"
+        echo ""
+        echo "--- credential files ---"
+        ls -la /Users/fanusdigital/.cloudflared/*.json 2>/dev/null || echo "No credential JSON files"
 
         echo ""
-        echo "=== 9. Recent worker logs (last 30 lines) ==="
-        tail -30 ~/thakii-worker-service/logs/worker.log 2>/dev/null || echo "No worker.log found"
+        echo "=== 8. cloudflared version ==="
+        cloudflared --version 2>/dev/null || echo "cloudflared not installed"
 
         echo ""
-        echo "=== 10. Recent worker errors ==="
-        tail -15 ~/thakii-worker-service/logs/worker_error.log 2>/dev/null || echo "No error log"
+        echo "=== 9. cloudflared tunnel list ==="
+        cloudflared tunnel list 2>/dev/null || echo "Cannot list tunnels (may need auth)"
 
         echo ""
-        echo "=== 11. Nginx status ==="
-        sudo nginx -t 2>&1 || echo "Nginx config check failed"
-        sudo cat /usr/local/etc/nginx/nginx.conf 2>/dev/null | grep -A 10 "location /thakii-worker" || echo "No nginx thakii-worker config found"
+        echo "=== 10. All LaunchAgents (cloudflared/tunnel related) ==="
+        ls -la ~/Library/LaunchAgents/ 2>/dev/null | grep -i -E "cloud|tunnel" || echo "No cloudflared LaunchAgents found"
+        echo "--- All LaunchAgents ---"
+        ls ~/Library/LaunchAgents/ 2>/dev/null
 
         echo ""
-        echo "=== 12. .env file (redacted) ==="
-        cd ~/thakii-worker-service 2>/dev/null && cat .env 2>/dev/null | sed 's/\(.*KEY.*=\).*/\1***REDACTED***/' | sed 's/\(.*SECRET.*=\).*/\1***REDACTED***/' | sed 's/\(.*PASSWORD.*=\).*/\1***REDACTED***/' || echo "No .env found"
+        echo "=== 11. LaunchDaemons (system-level, cloudflared) ==="
+        ls /Library/LaunchDaemons/ 2>/dev/null | grep -i cloud || echo "No system cloudflared daemons"
 
         echo ""
-        echo "=============================="
-        echo "  STATUS CHECK COMPLETE"
-        echo "=============================="
+        echo "=== 12. cloudflared LaunchAgent plist content ==="
+        for plist in ~/Library/LaunchAgents/com.cloudflare*; do
+          if [ -f "$plist" ]; then
+            echo "--- $plist ---"
+            cat "$plist"
+            echo ""
+          fi
+        done
+        echo "Check /Library/LaunchDaemons too:"
+        for plist in /Library/LaunchDaemons/com.cloudflare*; do
+          if [ -f "$plist" ]; then
+            echo "--- $plist ---"
+            cat "$plist" 2>/dev/null || echo "Cannot read (permission denied)"
+            echo ""
+          fi
+        done
+
+        echo ""
+        echo "=========================================="
+        echo "  NGINX INVESTIGATION"
+        echo "=========================================="
+
+        echo ""
+        echo "=== 13. nginx process ==="
+        ps aux | grep nginx | grep -v grep || echo "⚠️  nginx NOT running!"
+
+        echo ""
+        echo "=== 14. Ports 80 and 443 ==="
+        lsof -i :80 2>/dev/null | head -5 || echo "Nothing on port 80"
+        echo "---"
+        lsof -i :443 2>/dev/null | head -5 || echo "Nothing on port 443"
+
+        echo ""
+        echo "=== 15. nginx config (full, non-sudo attempt) ==="
+        cat /usr/local/etc/nginx/nginx.conf 2>/dev/null || cat /opt/homebrew/etc/nginx/nginx.conf 2>/dev/null || echo "Cannot read nginx config without sudo"
+
+        echo ""
+        echo "=== 16. All listening ports ==="
+        lsof -iTCP -sTCP:LISTEN -P 2>/dev/null | head -30 || echo "Cannot list ports"
+
+        echo ""
+        echo "=========================================="
+        echo "  NETWORK / CONNECTIVITY"
+        echo "=========================================="
+
+        echo ""
+        echo "=== 17. Test from API server with prefix path ==="
+        curl -sv http://localhost:8000/thakii-worker/health 2>&1 | head -20 || echo "Failed"
+        echo ""
+        echo "=== 18. Test without prefix ==="
+        curl -sv http://localhost:8000/health 2>&1 | head -20 || echo "Failed"
+
+        echo ""
+        echo "=== 19. Recent cloudflared logs ==="
+        cat /Users/fanusdigital/.cloudflared/cloudflared.log 2>/dev/null | tail -50 || echo "No cloudflared log file"
+        echo "--- system log for cloudflared ---"
+        log show --predicate 'process == "cloudflared"' --last 10m 2>/dev/null | tail -30 || echo "Cannot read system logs"
+
+        echo ""
+        echo "=== 20. Brew services (if using homebrew) ==="
+        brew services list 2>/dev/null | grep -i -E "cloud|nginx|tunnel" || echo "No relevant brew services"
+
+        echo ""
+        echo "=== 21. Recent API errors ==="
+        tail -20 ~/thakii-worker-service/logs/api_server_error.log 2>/dev/null || echo "No error log"
+
+        echo ""
+        echo "============================================"
+        echo "  DEEP DIAGNOSTIC COMPLETE"
+        echo "============================================"
         ENDSSH
 
         kill $TUNNEL_PID 2>/dev/null || true
@@ -89,3 +171,6 @@ jobs:
       run: |
         echo "=== Public Health Check ==="
         curl -sv "https://thakii-3.fanusdigital.site/thakii-worker/health" 2>&1 || echo "Public endpoint unreachable"
+        echo ""
+        echo "=== Test without path prefix ==="
+        curl -sv "https://thakii-3.fanusdigital.site/health" 2>&1 || echo "Failed"
