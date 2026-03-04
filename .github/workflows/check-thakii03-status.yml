@@ -1,0 +1,91 @@
+name: Check thakii-03 Worker Status
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check_status:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Setup SSH tools
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+
+    - name: Check Worker Status on thakii-03
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2201 &
+        TUNNEL_PID=$!
+        sleep 15
+
+        echo "=============================="
+        echo "  THAKII-03 WORKER STATUS"
+        echo "=============================="
+
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2201 fanusdigital@localhost << 'ENDSSH'
+
+        echo ""
+        echo "=== 1. LaunchAgents ==="
+        launchctl list | grep thakii || echo "⚠️  No thakii LaunchAgents loaded"
+
+        echo ""
+        echo "=== 2. Python processes ==="
+        ps aux | grep -E "python.*(worker\.py|api_server\.py|rq_worker\.py)" | grep -v grep || echo "⚠️  No worker/api processes running"
+
+        echo ""
+        echo "=== 3. Port 8000 ==="
+        lsof -i :8000 2>/dev/null || echo "⚠️  Nothing listening on port 8000"
+
+        echo ""
+        echo "=== 4. API health (localhost:8000/health) ==="
+        curl -sf http://localhost:8000/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "⚠️  API not responding"
+
+        echo ""
+        echo "=== 5. Deployment status (localhost:8000/status) ==="
+        curl -sf http://localhost:8000/status 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "⚠️  /status not available"
+
+        echo ""
+        echo "=== 6. Disk usage ==="
+        df -h / /tmp 2>/dev/null || df -h
+
+        echo ""
+        echo "=== 7. Recent API server logs (last 30 lines) ==="
+        tail -30 ~/thakii-worker-service/logs/api_server.log 2>/dev/null || echo "No api_server.log found"
+
+        echo ""
+        echo "=== 8. Recent API server errors ==="
+        tail -15 ~/thakii-worker-service/logs/api_server_error.log 2>/dev/null || echo "No error log"
+
+        echo ""
+        echo "=== 9. Recent worker logs (last 30 lines) ==="
+        tail -30 ~/thakii-worker-service/logs/worker.log 2>/dev/null || echo "No worker.log found"
+
+        echo ""
+        echo "=== 10. Recent worker errors ==="
+        tail -15 ~/thakii-worker-service/logs/worker_error.log 2>/dev/null || echo "No error log"
+
+        echo ""
+        echo "=== 11. Nginx status ==="
+        sudo nginx -t 2>&1 || echo "Nginx config check failed"
+        sudo cat /usr/local/etc/nginx/nginx.conf 2>/dev/null | grep -A 10 "location /thakii-worker" || echo "No nginx thakii-worker config found"
+
+        echo ""
+        echo "=== 12. .env file (redacted) ==="
+        cd ~/thakii-worker-service 2>/dev/null && cat .env 2>/dev/null | sed 's/\(.*KEY.*=\).*/\1***REDACTED***/' | sed 's/\(.*SECRET.*=\).*/\1***REDACTED***/' | sed 's/\(.*PASSWORD.*=\).*/\1***REDACTED***/' || echo "No .env found"
+
+        echo ""
+        echo "=============================="
+        echo "  STATUS CHECK COMPLETE"
+        echo "=============================="
+        ENDSSH
+
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+
+    - name: Test Public Health Endpoint
+      run: |
+        echo "=== Public Health Check ==="
+        curl -sv "https://thakii-3.fanusdigital.site/thakii-worker/health" 2>&1 || echo "Public endpoint unreachable"
