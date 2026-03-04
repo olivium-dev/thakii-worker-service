@@ -1,0 +1,114 @@
+name: Fix nginx on thakii-03
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix_nginx:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Setup SSH tools
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+
+    - name: Restart nginx on thakii-03
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2201 &
+        TUNNEL_PID=$!
+        sleep 15
+
+        echo "🔧 Fixing nginx on thakii-03..."
+
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2201 fanusdigital@localhost bash << 'ENDSSH'
+        set +e
+
+        echo "=== Before fix ==="
+        echo "nginx processes:"
+        ps aux | grep nginx | grep -v grep || echo "  nginx NOT running"
+
+        echo ""
+        echo "Port 8080:"
+        lsof -i :8080 2>/dev/null || echo "  Nothing on 8080"
+
+        echo ""
+        echo "Port 8000 (Flask API):"
+        lsof -i :8000 2>/dev/null || echo "  Nothing on 8000"
+
+        echo ""
+        echo "=== nginx config ==="
+        for conf in /opt/homebrew/etc/nginx/nginx.conf /usr/local/etc/nginx/nginx.conf; do
+          if [ -f "$conf" ]; then
+            echo "Found: $conf"
+            cat "$conf"
+            echo ""
+            break
+          fi
+        done
+
+        echo ""
+        echo "=== Restarting nginx ==="
+        brew services stop nginx 2>/dev/null
+        sleep 2
+        brew services start nginx 2>/dev/null
+        BREW_RESULT=$?
+
+        if [ $BREW_RESULT -ne 0 ]; then
+          echo "brew services failed, trying launchctl..."
+          launchctl unload ~/Library/LaunchAgents/homebrew.mxcl.nginx.plist 2>/dev/null
+          sleep 1
+          launchctl load ~/Library/LaunchAgents/homebrew.mxcl.nginx.plist 2>/dev/null
+        fi
+
+        sleep 3
+
+        echo ""
+        echo "=== After fix ==="
+        echo "nginx processes:"
+        ps aux | grep nginx | grep -v grep || echo "  nginx still NOT running!"
+
+        echo ""
+        echo "Port 8080:"
+        lsof -i :8080 2>/dev/null || echo "  Still nothing on 8080"
+
+        echo ""
+        echo "=== Testing full request chain ==="
+        echo "1. Direct to Flask (8000):"
+        curl -s http://localhost:8000/health | head -3
+        echo ""
+
+        echo "2. Through nginx (8080) with /thakii-worker prefix:"
+        curl -s -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:8080/thakii-worker/health
+        curl -s http://localhost:8080/thakii-worker/health | head -3
+        echo ""
+
+        echo "3. nginx error log:"
+        tail -10 /opt/homebrew/var/log/nginx/error.log 2>/dev/null || tail -10 /usr/local/var/log/nginx/error.log 2>/dev/null || echo "  No nginx error log found"
+
+        echo ""
+        echo "=== Done ==="
+        ENDSSH
+
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+
+    - name: Verify public endpoint
+      run: |
+        echo "Waiting 10s..."
+        sleep 10
+
+        echo "=== Testing public endpoint ==="
+        HTTP_CODE=$(curl -s -o /tmp/health_response.txt -w "%{http_code}" "https://thakii-3.fanusdigital.site/thakii-worker/health")
+        echo "HTTP Status: $HTTP_CODE"
+        cat /tmp/health_response.txt
+
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo ""
+          echo "🎉 SUCCESS! The 502 is fixed. Public endpoint is healthy."
+        else
+          echo ""
+          echo "⚠️ Still getting HTTP $HTTP_CODE. May need further investigation."
+        fi
