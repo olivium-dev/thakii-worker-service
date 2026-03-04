@@ -29,47 +29,71 @@ jobs:
         echo "=== Before fix ==="
         echo "nginx processes:"
         ps aux | grep nginx | grep -v grep || echo "  nginx NOT running"
-
         echo ""
         echo "Port 8080:"
         lsof -i :8080 2>/dev/null || echo "  Nothing on 8080"
 
         echo ""
-        echo "Port 8000 (Flask API):"
-        lsof -i :8000 2>/dev/null || echo "  Nothing on 8000"
+        echo "============================================"
+        echo "  FIX: nginx PID file permission denied"
+        echo "============================================"
+
+        echo "Checking /opt/homebrew/var/run/ permissions:"
+        ls -la /opt/homebrew/var/run/ 2>/dev/null || echo "  Directory doesn't exist!"
 
         echo ""
-        echo "=== nginx config ==="
-        for conf in /opt/homebrew/etc/nginx/nginx.conf /usr/local/etc/nginx/nginx.conf; do
-          if [ -f "$conf" ]; then
-            echo "Found: $conf"
-            cat "$conf"
-            echo ""
-            break
-          fi
-        done
+        echo "Fixing PID directory permissions..."
+        mkdir -p /opt/homebrew/var/run 2>/dev/null
+        chmod 755 /opt/homebrew/var/run 2>/dev/null
+
+        echo "Removing stale PID file if any..."
+        rm -f /opt/homebrew/var/run/nginx.pid 2>/dev/null
+
+        echo "Checking ownership of /opt/homebrew/var/run/:"
+        ls -la /opt/homebrew/var/ 2>/dev/null | grep run
 
         echo ""
-        echo "=== Restarting nginx ==="
-        brew services stop nginx 2>/dev/null
-        sleep 2
-        brew services start nginx 2>/dev/null
-        BREW_RESULT=$?
+        echo "Checking if /opt/homebrew/var/run is owned by us:"
+        whoami
+        stat -f "%Su:%Sg %Sp" /opt/homebrew/var/run/ 2>/dev/null || stat -c "%U:%G %a" /opt/homebrew/var/run/ 2>/dev/null
 
-        if [ $BREW_RESULT -ne 0 ]; then
-          echo "brew services failed, trying launchctl..."
-          launchctl unload ~/Library/LaunchAgents/homebrew.mxcl.nginx.plist 2>/dev/null
-          sleep 1
-          launchctl load ~/Library/LaunchAgents/homebrew.mxcl.nginx.plist 2>/dev/null
+        echo ""
+        echo "Fixing homebrew ownership..."
+        chown -R $(whoami) /opt/homebrew/var/run 2>/dev/null || echo "  chown failed (may need sudo)"
+        chmod -R 755 /opt/homebrew/var/run 2>/dev/null
+
+        echo ""
+        echo "Also check/fix nginx server config dir:"
+        ls -la /opt/homebrew/etc/nginx/servers/ 2>/dev/null || echo "  No servers dir"
+
+        echo ""
+        echo "=== Killing any stale nginx master process ==="
+        pkill -f "nginx: master" 2>/dev/null || echo "  No stale master to kill"
+        sleep 1
+
+        echo ""
+        echo "=== Starting nginx directly to test ==="
+        /opt/homebrew/bin/nginx -t 2>&1
+        NGINX_TEST=$?
+
+        if [ $NGINX_TEST -eq 0 ]; then
+          echo "Config test passed. Starting nginx..."
+          /opt/homebrew/bin/nginx 2>&1
+          sleep 2
+        else
+          echo "Config test FAILED. Checking for issues..."
+          echo ""
+          echo "Full nginx config:"
+          cat /opt/homebrew/etc/nginx/nginx.conf
+          echo ""
+          echo "Server configs:"
+          cat /opt/homebrew/etc/nginx/servers/* 2>/dev/null || echo "  No server configs"
         fi
-
-        sleep 3
 
         echo ""
         echo "=== After fix ==="
         echo "nginx processes:"
         ps aux | grep nginx | grep -v grep || echo "  nginx still NOT running!"
-
         echo ""
         echo "Port 8080:"
         lsof -i :8080 2>/dev/null || echo "  Still nothing on 8080"
@@ -77,16 +101,18 @@ jobs:
         echo ""
         echo "=== Testing full request chain ==="
         echo "1. Direct to Flask (8000):"
-        curl -s http://localhost:8000/health | head -3
-        echo ""
+        curl -s http://localhost:8000/health | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  status={d[\"status\"]}')" 2>/dev/null || echo "  Flask not responding"
 
         echo "2. Through nginx (8080) with /thakii-worker prefix:"
-        curl -s -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:8080/thakii-worker/health
-        curl -s http://localhost:8080/thakii-worker/health | head -3
-        echo ""
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/thakii-worker/health 2>/dev/null)
+        echo "  HTTP $HTTP_CODE"
+        if [ "$HTTP_CODE" = "200" ]; then
+          curl -s http://localhost:8080/thakii-worker/health | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  status={d[\"status\"]}')" 2>/dev/null
+        fi
 
-        echo "3. nginx error log:"
-        tail -10 /opt/homebrew/var/log/nginx/error.log 2>/dev/null || tail -10 /usr/local/var/log/nginx/error.log 2>/dev/null || echo "  No nginx error log found"
+        echo ""
+        echo "3. nginx error log (last 5 lines):"
+        tail -5 /opt/homebrew/var/log/nginx/error.log 2>/dev/null || echo "  No error log"
 
         echo ""
         echo "=== Done ==="
