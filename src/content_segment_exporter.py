@@ -50,12 +50,12 @@ class ContentSegmentPdfBuilder:
             
             font_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", f"{font_name}.ttf")
             if not os.path.exists(font_path):
-                print(f"⚠️ Font not found at {font_path}, using default font")
+                print(f"WARNING: Font not found at {font_path}, using default font")
                 font_name = "Arial"  # Fallback to default
             else:
                 pdf.add_font("CustomFont", "", font_path, uni=True)
                 font_name = "CustomFont"
-                print(f"✅ Custom font loaded: {font_name} at {font_size}pt")
+                print(f"Custom font loaded: {font_name} at {font_size}pt")
 
             for i in range(0, len(pages)):
                 # Temporarily save the frames
@@ -75,10 +75,10 @@ class ContentSegmentPdfBuilder:
                     except:
                         # Fallback to default font if custom font fails
                         pdf.set_font("Arial", "", font_size)
-                        print(f"⚠️ Using fallback Arial font at {font_size}pt")
+                        print(f"WARNING: Using fallback Arial font at {font_size}pt")
                     pdf.multi_cell(0, 10, pages[i].text)
                 else:
-                    print(f"⚠️ No text for page {i+1}: {repr(pages[i].text)}")
+                    print(f"WARNING: No text for page {i+1}: {repr(pages[i].text)}")
 
             pdf.output(output_filepath)
 

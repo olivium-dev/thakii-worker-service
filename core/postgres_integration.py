@@ -14,14 +14,24 @@ USE_HTTP_MODE = os.getenv('USE_HTTP_DATABASE', 'false').lower() == 'true'
 
 if USE_HTTP_MODE:
     # Use HTTP-based client for remote workers
-    from .http_postgres_client import HTTPPostgresClient as WorkerPostgresClient
-    print("🌐 Using HTTP-based PostgreSQL client")
+    try:
+        from .http_postgres_client import HTTPPostgresClient as WorkerPostgresClient
+        print("🌐 Using HTTP-based PostgreSQL client")
+    except ImportError as e:
+        print(f"❌ Failed to import HTTP PostgreSQL client: {e}")
+        raise
 else:
     # Use direct PostgreSQL connection for local workers
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-    from typing import Optional, Dict, Any, List
-    import datetime
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        from typing import Optional, Dict, Any, List
+        import datetime
+        print("🔗 Using direct PostgreSQL connection")
+    except ImportError as e:
+        print(f"❌ Failed to import psycopg2: {e}")
+        print("💡 Hint: Set USE_HTTP_DATABASE=true to use HTTP client instead")
+        raise
     
     class WorkerPostgresClient:
         def __init__(self):
@@ -294,5 +304,30 @@ else:
 
 
 # Global instance
-postgres_client = WorkerPostgresClient()
+try:
+    postgres_client = WorkerPostgresClient()
+    print("✅ PostgreSQL client initialized successfully")
+except Exception as e:
+    print(f"❌ Failed to initialize PostgreSQL client: {e}")
+    print(f"🔧 Environment: USE_HTTP_DATABASE={os.getenv('USE_HTTP_DATABASE', 'false')}")
+    
+    # Create a dummy client to prevent import errors
+    class DummyPostgresClient:
+        def is_available(self):
+            return False
+        def update_task_status(self, *args, **kwargs):
+            return False
+        def get_task_details(self, *args, **kwargs):
+            return None
+        def get_pending_tasks(self, *args, **kwargs):
+            return []
+        def create_video_task(self, *args, **kwargs):
+            return None
+        def get_all_tasks(self, *args, **kwargs):
+            return []
+        def notify_backend_update(self, *args, **kwargs):
+            pass
+    
+    postgres_client = DummyPostgresClient()
+    print("⚠️ Using dummy PostgreSQL client - database operations disabled")
 

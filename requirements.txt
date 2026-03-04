@@ -90,3 +90,14 @@ opencv-python-headless==4.12.0.88
 # Redis Queue for Video Processing
 redis==5.0.1
 rq==1.15.1
+
+# Video Processing Dependencies (for subtitle generation and enhanced processing)
+moviepy==1.0.3
+imageio==2.31.1
+imageio-ffmpeg==0.4.8
+
+# Plotting and Visualization (for debugging and analysis)
+matplotlib==3.7.2
+
+# Additional dependencies for enhanced video processing
+ffmpeg-python==0.2.0
