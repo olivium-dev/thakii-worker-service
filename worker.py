@@ -53,6 +53,20 @@ class EnhancedWorker:
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread = None
 
+        # Janitor thread config. The deploy-time cleanup is opportunistic;
+        # this background thread is the steady-state safety net that keeps
+        # /tmp from filling up between deploys. Defaults sized for a
+        # multi-hour idle window without losing in-progress work.
+        self.janitor_interval = int(os.getenv('JANITOR_INTERVAL_SECONDS', '300'))
+        self.janitor_max_age = int(os.getenv('JANITOR_MAX_AGE_SECONDS', '3600'))
+        self.min_free_gb_to_pickup = float(os.getenv('MIN_FREE_GB_TO_PICKUP', '5.0'))
+        self._janitor_stop = threading.Event()
+        self._janitor_thread = None
+
+        # One-shot startup cleanup so the very first task starts on a clean
+        # slate. Anything older than 5 minutes in our temp roots is fair game.
+        self._cleanup_temp_files(max_age_seconds=300, label='startup')
+
         print("🚀 Mac Mini M2 Optimized Worker", flush=True)
         print(f"   API Client: {'✅' if self.api.is_enabled else '❌'}", flush=True)
         print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}", flush=True)
@@ -89,6 +103,99 @@ class EnhancedWorker:
         print(f"   ⚠️  Using system temp (fallback): {system_temp}", flush=True)
         return str(system_temp)
     
+    # ====== Disk hygiene (deploy-time cleanup is supplementary) ======
+
+    def _get_free_gb(self, path: str) -> float:
+        try:
+            return shutil.disk_usage(path).free / (1024 ** 3)
+        except Exception:
+            return -1.0
+
+    def _cleanup_temp_files(self, max_age_seconds: int, label: str = 'janitor'):
+        """Best-effort prune of stale temp artefacts. We only touch files
+        we know we created (mp4/pdf/srt) or directories under our own
+        temp roots, and only if they're older than max_age_seconds — so a
+        currently-running download is never disturbed."""
+        roots = []
+        # Primary temp dir the worker writes to
+        if self.temp_base_dir and os.path.isdir(self.temp_base_dir):
+            roots.append(self.temp_base_dir)
+        # System /tmp on Linux/macOS even if temp_base_dir is something else
+        if '/tmp' not in roots and os.path.isdir('/tmp'):
+            roots.append('/tmp')
+
+        now = time.time()
+        removed_files = 0
+        removed_dirs = 0
+        bytes_freed = 0
+        for root in roots:
+            try:
+                for name in os.listdir(root):
+                    path = os.path.join(root, name)
+                    try:
+                        st = os.lstat(path)
+                    except OSError:
+                        continue
+                    age = now - st.st_mtime
+                    if age < max_age_seconds:
+                        continue
+
+                    # Only kill things that look like ours
+                    if os.path.isdir(path) and not os.path.islink(path):
+                        if name.startswith('tmp') or name == 'thakii-worker':
+                            try:
+                                bytes_freed += self._dir_size(path)
+                                shutil.rmtree(path, ignore_errors=True)
+                                removed_dirs += 1
+                            except Exception:
+                                pass
+                    elif os.path.isfile(path):
+                        if name.endswith(('.mp4', '.pdf', '.srt')) or '.mp4.' in name:
+                            try:
+                                bytes_freed += st.st_size
+                                os.unlink(path)
+                                removed_files += 1
+                            except Exception:
+                                pass
+            except Exception as e:
+                print(f"⚠️ {label} cleanup error in {root}: {e}", flush=True)
+
+        if removed_files or removed_dirs:
+            mb = bytes_freed / (1024 * 1024)
+            print(f"🧹 {label} cleanup: removed {removed_files} files, {removed_dirs} dirs, freed ~{mb:.1f} MB. Free now: {self._get_free_gb(self.temp_base_dir):.2f} GB", flush=True)
+
+    @staticmethod
+    def _dir_size(path: str) -> int:
+        total = 0
+        for dirpath, _, filenames in os.walk(path):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                try:
+                    total += os.path.getsize(fp)
+                except OSError:
+                    pass
+        return total
+
+    def _janitor_loop(self):
+        print(f"🧹 Janitor thread started (interval={self.janitor_interval}s, max_age={self.janitor_max_age}s)", flush=True)
+        while not self._janitor_stop.wait(self.janitor_interval):
+            try:
+                self._cleanup_temp_files(self.janitor_max_age, label='janitor')
+            except Exception as e:
+                print(f"⚠️ Janitor error: {e}", flush=True)
+        print("🧹 Janitor thread stopping", flush=True)
+
+    def start_janitor(self):
+        if self._janitor_thread is not None and self._janitor_thread.is_alive():
+            return
+        self._janitor_stop.clear()
+        self._janitor_thread = threading.Thread(
+            target=self._janitor_loop, name='worker-janitor', daemon=True)
+        self._janitor_thread.start()
+
+    def stop_janitor(self):
+        self._janitor_stop.set()
+
     # ====== Heartbeat / active-task tracking helpers (Phase C1) ======
 
     def _track_task(self, video_id: str):
@@ -225,6 +332,15 @@ class EnhancedWorker:
                 else:
                     self.postgres.update_task_status(video_id, "processing")
                 
+                # Pre-task disk hygiene: if we're tight on space, run an
+                # emergency janitor sweep BEFORE asking S3 for the file.
+                # Better to free 30 GB of stale partials than to fail a
+                # 12 GB download halfway through and leak disk.
+                pre_free_gb = self._get_free_gb(self.temp_base_dir)
+                if pre_free_gb < self.min_free_gb_to_pickup:
+                    print(f"⚠️ Free {pre_free_gb:.2f} GB < threshold {self.min_free_gb_to_pickup} GB; emergency sweep", flush=True)
+                    self._cleanup_temp_files(max_age_seconds=60, label='pre-task')
+
                 # Download video (use exact s3_key if available). Build a
                 # detailed error message so operators can tell at a glance
                 # whether it was permissions, disk, network, etc.
@@ -336,6 +452,8 @@ class EnhancedWorker:
         # the very first picked-up task already has a live signal to the
         # backend reaper.
         self.start_heartbeat()
+        # Disk-hygiene daemon: keep /tmp from filling up between deploys.
+        self.start_janitor()
 
         poll_interval = int(os.getenv('WORKER_POLL_INTERVAL', 10))
         active_tasks = set()
@@ -396,6 +514,7 @@ class EnhancedWorker:
             except KeyboardInterrupt:
                 print("\n🛑 Worker stopping gracefully...", flush=True)
                 self.stop_heartbeat()
+                self.stop_janitor()
                 self.executor.shutdown(wait=True, cancel_futures=False)
                 break
             except Exception as e:

@@ -39,55 +39,95 @@ class WorkerS3Client:
     def is_available(self) -> bool:
         return self.s3_client is not None
     
+    def get_object_size(self, s3_key: str) -> Optional[int]:
+        """HEAD the object so we know how much disk we'll need before we
+        start writing. Returns None if HEAD fails (we'll let download
+        proceed and surface the real error if any)."""
+        if not self.is_available():
+            return None
+        try:
+            resp = self.s3_client.head_object(Bucket=self.bucket_name, Key=s3_key)
+            return int(resp['ContentLength'])
+        except Exception as e:
+            print(f"⚠️ HEAD failed for {s3_key}: {e}", flush=True)
+            return None
+
+    def _resolve_s3_key(self, video_id: str, s3_key: Optional[str]) -> Optional[str]:
+        if s3_key:
+            return s3_key
+        try:
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket_name, Prefix=f"videos/{video_id}/"
+            )
+            contents = response.get('Contents') or []
+            if contents:
+                return contents[0]['Key']
+        except Exception as e:
+            self.last_error = f"list_objects_v2 failed: {type(e).__name__}: {e}"
+        return None
+
     def download_video(self, video_id: str, local_path: str, s3_key: str = None) -> bool:
+        """Download an S3 object, but ONLY if there is enough disk space
+        for it. The worker frequently fills /tmp before crashing partway
+        through `boto3.download_file`, leaving a stale partial file that
+        wastes more disk. Pre-flight here:
+          1. Resolve the real S3 key.
+          2. HEAD it for the exact byte count.
+          3. Compare to free space at the destination.
+          4. If insufficient, set last_error to a clear message and bail
+             so the caller can mark the task failed and move on. boto3 is
+             never invoked → no half-written partials."""
+        import shutil as _sh
+
         if not self.is_available():
             self.last_error = "S3 client not available (boto3 init failed)"
             return False
 
-        # Reset before each attempt so a stale message from a prior task
-        # doesn't get attributed to this one.
         self.last_error = None
 
-        # Pre-flight: free disk space at the destination. Most "Download
-        # failed" reports are really ENOSPC; surfacing it explicitly saves
-        # hours of investigation.
-        try:
-            parent = os.path.dirname(local_path) or '.'
-            usage = __import__('shutil').disk_usage(parent)
-            free_gb = usage.free / (1024 ** 3)
-            print(f"📦 Free space at {parent}: {free_gb:.2f} GB", flush=True)
-            if usage.free < 1024 * 1024 * 1024:  # <1 GB
-                self.last_error = f"low disk space at {parent}: {free_gb:.2f} GB free"
-                print(f"⚠️ {self.last_error}", flush=True)
-        except Exception as space_err:
-            print(f"⚠️ Could not check free space: {space_err}", flush=True)
-
-        try:
-            if s3_key:
-                print(f"🎯 Using exact S3 key from backend: {s3_key}", flush=True)
-                self.s3_client.download_file(self.bucket_name, s3_key, local_path)
-                print(f"✅ Video downloaded via exact key: {s3_key}", flush=True)
-                return True
-
-            print(f"⚠️ No exact S3 key provided, searching in videos/{video_id}/", flush=True)
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket_name,
-                Prefix=f"videos/{video_id}/"
-            )
-            if 'Contents' in response and len(response['Contents']) > 0:
-                found_s3_key = response['Contents'][0]['Key']
-                self.s3_client.download_file(self.bucket_name, found_s3_key, local_path)
-                print(f"✅ Video downloaded via search: {found_s3_key}", flush=True)
-                return True
-
-            self.last_error = f"no S3 objects under videos/{video_id}/"
+        resolved_key = self._resolve_s3_key(video_id, s3_key)
+        if not resolved_key:
+            self.last_error = self.last_error or f"no S3 objects under videos/{video_id}/"
             print(f"❌ {self.last_error}", flush=True)
             return False
 
+        # Pre-flight free-space check. Headroom = file size + 256 MB
+        # safety + 2x for whisper/ffmpeg intermediates.
+        size_bytes = self.get_object_size(resolved_key)
+        parent = os.path.dirname(local_path) or '.'
+        try:
+            free_bytes = _sh.disk_usage(parent).free
         except Exception as e:
-            # Capture the full exception type + message so the operator
-            # can see "AccessDenied", "EndpointConnectionError",
-            # "[Errno 28] No space left on device", etc.
+            free_bytes = None
+            print(f"⚠️ Could not check free space at {parent}: {e}", flush=True)
+
+        if size_bytes is not None and free_bytes is not None:
+            needed = (size_bytes * 2) + (256 * 1024 * 1024)
+            free_gb = free_bytes / (1024 ** 3)
+            need_gb = needed / (1024 ** 3)
+            file_gb = size_bytes / (1024 ** 3)
+            print(f"📦 disk: free={free_gb:.2f} GB, file={file_gb:.2f} GB, headroom_required={need_gb:.2f} GB", flush=True)
+            if free_bytes < needed:
+                self.last_error = (
+                    f"insufficient disk space: have {free_gb:.2f} GB free, "
+                    f"need ~{need_gb:.2f} GB for {file_gb:.2f} GB file at {parent}"
+                )
+                print(f"❌ {self.last_error}", flush=True)
+                return False
+
+        try:
+            print(f"🎯 Downloading S3 key: {resolved_key}", flush=True)
+            self.s3_client.download_file(self.bucket_name, resolved_key, local_path)
+            print(f"✅ Video downloaded: {resolved_key}", flush=True)
+            return True
+        except Exception as e:
+            # Best-effort cleanup of the half-written partial so we don't
+            # leak disk on the way out.
+            try:
+                if os.path.exists(local_path):
+                    os.unlink(local_path)
+            except Exception:
+                pass
             err_type = type(e).__name__
             self.last_error = f"{err_type}: {e}"[:500]
             print(f"❌ S3 download error: {self.last_error}", flush=True)

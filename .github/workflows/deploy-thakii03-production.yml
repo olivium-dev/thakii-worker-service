@@ -35,6 +35,55 @@ jobs:
           PreferredAuthentications password
         EOF
     
+    - name: 🧹 Reclaim disk space on thakii-03
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2199 &
+        TUNNEL_PID=$!
+        sleep 15
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2199 fanusdigital@localhost <<'ENDSSH'
+        set +e
+        echo "=== Disk usage BEFORE cleanup ==="
+        df -h / /tmp /Users 2>/dev/null
+        echo
+        echo "=== Top consumers under /tmp ==="
+        du -sh /tmp/* 2>/dev/null | sort -h | tail -10
+        echo
+        echo "=== Removing stale worker temp files ==="
+        # Files the worker creates / leaves behind on partial download
+        rm -rf /tmp/thakii-worker 2>/dev/null
+        # Python tempfile.TemporaryDirectory() artefacts
+        find /tmp -maxdepth 1 -name 'tmp*' -type d -mmin +5 -exec rm -rf {} + 2>/dev/null
+        find /tmp -maxdepth 2 -name '*.mp4' -type f -mmin +5 -delete 2>/dev/null
+        find /tmp -maxdepth 2 -name '*.pdf' -type f -mmin +5 -delete 2>/dev/null
+        find /tmp -maxdepth 2 -name '*.srt' -type f -mmin +5 -delete 2>/dev/null
+        # boto3 multipart download partials
+        find /tmp -maxdepth 2 -name '*.mp4.*' -type f -mmin +5 -delete 2>/dev/null
+        # Old worker log rotation: keep 7 days
+        find /Users/fanusdigital/thakii-worker-service/logs -type f -mtime +7 -delete 2>/dev/null
+        # External SSD temp if present
+        if [ -d /mnt/external-ssd/temp ]; then
+          rm -rf /mnt/external-ssd/temp/* 2>/dev/null
+        fi
+        echo
+        echo "=== Disk usage AFTER cleanup ==="
+        df -h / /tmp /Users 2>/dev/null
+        echo
+        FREE_KB=$(df -k /tmp 2>/dev/null | awk 'NR==2{print $4}')
+        FREE_GB=$(awk -v k="$FREE_KB" 'BEGIN{printf "%.2f", k/1024/1024}')
+        echo "Free on /tmp after cleanup: ${FREE_GB} GB"
+        # Fail the deploy if we still have less than 5 GB free.
+        if awk -v g="$FREE_GB" 'BEGIN{exit !(g+0 < 5)}'; then
+          echo "❌ Less than 5 GB free after cleanup — aborting deploy. Investigate manually."
+          exit 1
+        fi
+        ENDSSH
+        STATUS=$?
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+        exit $STATUS
+
     - name: 📦 Package and Deploy Code to thakii-03
       env:
         THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
