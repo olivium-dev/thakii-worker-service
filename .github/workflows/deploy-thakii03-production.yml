@@ -128,10 +128,23 @@ jobs:
         FREE_GB=$(awk -v k="$FREE_KB" 'BEGIN{printf "%.2f", k/1024/1024}')
         echo
         echo "Free on / after cleanup: ${FREE_GB} GB"
-        # Fail the deploy if we still have less than 5 GB free.
-        if awk -v g="$FREE_GB" 'BEGIN{exit !(g+0 < 5)}'; then
-          echo "❌ Less than 5 GB free after cleanup — aborting deploy. Investigate manually."
+        # Threshold rationale:
+        #   * Pre-flight in s3_integration.download_video fails any task
+        #     that needs >free space, so we no longer ENOSPC mid-download.
+        #   * Most batch-imported videos are 400-700 MB; a 3 GB floor
+        #     leaves room for whisper temp files + a 700 MB download.
+        #   * Bigger videos (multi-GB) will be rejected at pre-flight with
+        #     a clear "insufficient disk space" error, not silently stuck.
+        if awk -v g="$FREE_GB" 'BEGIN{exit !(g+0 < 3)}'; then
+          echo "❌ Less than 3 GB free after cleanup — aborting deploy."
+          echo "   Look at the 'Largest 15 files' dump above to find the byte hog."
+          echo "   On thakii-03 (shared box), check: /Users/fanusdigital/~ (literal),"
+          echo "   /Users/fanusdigital/Library, ~/.ollama/models, ~/Downloads."
           exit 1
+        fi
+        if awk -v g="$FREE_GB" 'BEGIN{exit !(g+0 < 10)}'; then
+          echo "⚠️  Free disk is below 10 GB. Multi-GB videos will be rejected"
+          echo "    at pre-flight with 'insufficient disk space' — by design."
         fi
         ENDSSH
         STATUS=$?
