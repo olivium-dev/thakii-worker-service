@@ -45,34 +45,89 @@ jobs:
         sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2199 fanusdigital@localhost <<'ENDSSH'
         set +e
         echo "=== Disk usage BEFORE cleanup ==="
-        df -h / /tmp /Users 2>/dev/null
+        df -h / 2>/dev/null
+        echo
+        echo "=== Where are the bytes? top dirs under /Users/fanusdigital ==="
+        du -sh /Users/fanusdigital/* 2>/dev/null | sort -h | tail -10
+        echo
+        echo "=== Top dirs inside the worker service ==="
+        du -sh /Users/fanusdigital/thakii-worker-service/* 2>/dev/null | sort -h | tail -10
         echo
         echo "=== Top consumers under /tmp ==="
         du -sh /tmp/* 2>/dev/null | sort -h | tail -10
         echo
         echo "=== Removing stale worker temp files ==="
-        # Files the worker creates / leaves behind on partial download
+
+        ## /tmp sweep
         rm -rf /tmp/thakii-worker 2>/dev/null
-        # Python tempfile.TemporaryDirectory() artefacts
         find /tmp -maxdepth 1 -name 'tmp*' -type d -mmin +5 -exec rm -rf {} + 2>/dev/null
-        find /tmp -maxdepth 2 -name '*.mp4' -type f -mmin +5 -delete 2>/dev/null
-        find /tmp -maxdepth 2 -name '*.pdf' -type f -mmin +5 -delete 2>/dev/null
-        find /tmp -maxdepth 2 -name '*.srt' -type f -mmin +5 -delete 2>/dev/null
-        # boto3 multipart download partials
-        find /tmp -maxdepth 2 -name '*.mp4.*' -type f -mmin +5 -delete 2>/dev/null
-        # Old worker log rotation: keep 7 days
-        find /Users/fanusdigital/thakii-worker-service/logs -type f -mtime +7 -delete 2>/dev/null
-        # External SSD temp if present
+        find /tmp -maxdepth 2 \( -name '*.mp4' -o -name '*.pdf' -o -name '*.srt' -o -name '*.mp4.*' \) \
+                  -type f -mmin +5 -delete 2>/dev/null
+
+        ## Worker's own working directory: orphan video / pdf / srt that
+        ## process_video should have cleaned but didn't (older than 30 min).
+        WS=/Users/fanusdigital/thakii-worker-service
+        find "$WS" -maxdepth 3 \( -name '*.mp4' -o -name '*.srt' \) \
+                   -type f -mmin +30 -size +10M -delete 2>/dev/null
+        # Direct-upload PDFs created in the worker dir; keep none older than 1 day
+        find "$WS" -maxdepth 1 -name 'direct-*.pdf' -mtime +1 -delete 2>/dev/null
+        find "$WS" -maxdepth 1 -name 'direct-*.mp4' -mtime +1 -delete 2>/dev/null
+
+        ## Worker logs: rotate aggressively. systemd doesn't manage these
+        ## logs (LaunchAgent appends forever), so they grow unbounded.
+        # Truncate live logs in place (keeps file handle open for tail -f)
+        for L in worker.log worker_error.log api_server.log api_server_error.log rq_worker.log rq_worker_error.log; do
+          if [ -f "$WS/logs/$L" ]; then
+            SIZE_MB=$(du -m "$WS/logs/$L" 2>/dev/null | awk '{print $1}')
+            if [ "${SIZE_MB:-0}" -gt 100 ]; then
+              # Keep last 5000 lines for forensics
+              TAIL=$(tail -5000 "$WS/logs/$L" 2>/dev/null)
+              : > "$WS/logs/$L"
+              echo "$TAIL" >> "$WS/logs/$L"
+              echo "Truncated $L (was ${SIZE_MB} MB, kept last 5000 lines)"
+            fi
+          fi
+        done
+        # Old rotated logs / partials
+        find "$WS/logs" -type f -name '*.log.*' -delete 2>/dev/null
+        find "$WS/logs" -type f -mtime +7 -delete 2>/dev/null
+
+        ## Big system / user-cache hogs (typical macOS culprits)
+        # Whisper/torch model caches kept across deploys; only delete if huge
+        for CACHE in ~/.cache/whisper ~/.cache/huggingface ~/.cache/pip ~/Library/Caches/pip ~/Library/Caches/com.apple.dt.Xcode; do
+          if [ -d "$CACHE" ]; then
+            SIZE_MB=$(du -sm "$CACHE" 2>/dev/null | awk '{print $1}')
+            if [ "${SIZE_MB:-0}" -gt 2048 ]; then
+              echo "Pruning $CACHE (${SIZE_MB} MB)"
+              rm -rf "$CACHE"/* 2>/dev/null
+            fi
+          fi
+        done
+
+        ## Other tmp-ish dirs
+        find /tmp -maxdepth 1 -name 'postgres_tunnel*.log' -size +10M -mtime +3 -delete 2>/dev/null
+        find /tmp -maxdepth 1 -name 'tunnel_monitor.log' -size +10M -mtime +3 -delete 2>/dev/null
+        find /tmp -maxdepth 1 -name 'cloudflare-tunnel.log*' -size +10M -mtime +3 -delete 2>/dev/null
+
+        ## External SSD temp if present
         if [ -d /mnt/external-ssd/temp ]; then
           rm -rf /mnt/external-ssd/temp/* 2>/dev/null
         fi
+
+        ## macOS: empty Trash for the worker user
+        rm -rf ~/.Trash/* 2>/dev/null
+
         echo
         echo "=== Disk usage AFTER cleanup ==="
-        df -h / /tmp /Users 2>/dev/null
+        df -h / 2>/dev/null
         echo
-        FREE_KB=$(df -k /tmp 2>/dev/null | awk 'NR==2{print $4}')
+        echo "=== Largest 15 files anywhere under /Users/fanusdigital (>100 MB) ==="
+        find /Users/fanusdigital -type f -size +100M 2>/dev/null | xargs -I{} du -h "{}" 2>/dev/null | sort -h | tail -15
+
+        FREE_KB=$(df -k / 2>/dev/null | awk 'NR==2{print $4}')
         FREE_GB=$(awk -v k="$FREE_KB" 'BEGIN{printf "%.2f", k/1024/1024}')
-        echo "Free on /tmp after cleanup: ${FREE_GB} GB"
+        echo
+        echo "Free on / after cleanup: ${FREE_GB} GB"
         # Fail the deploy if we still have less than 5 GB free.
         if awk -v g="$FREE_GB" 'BEGIN{exit !(g+0 < 5)}'; then
           echo "❌ Less than 5 GB free after cleanup — aborting deploy. Investigate manually."
