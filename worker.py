@@ -225,12 +225,17 @@ class EnhancedWorker:
                 else:
                     self.postgres.update_task_status(video_id, "processing")
                 
-                # Download video (use exact s3_key if available)
+                # Download video (use exact s3_key if available). Build a
+                # detailed error message so operators can tell at a glance
+                # whether it was permissions, disk, network, etc.
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
+                    detail = getattr(self.s3, 'last_error', None) or 'unknown error'
+                    err = f"Download failed (s3_key={s3_key}, file={filename}): {detail}"
+                    print(f"❌ {err}", flush=True)
                     if self.api.is_enabled:
-                        self.api.update_task_status(video_id, "failed", error_message="Download failed")
+                        self.api.update_task_status(video_id, "failed", error_message=err)
                     else:
-                        self.postgres.update_task_status(video_id, "failed", error_message="Download failed")
+                        self.postgres.update_task_status(video_id, "failed", error_message=err)
                     return False
                 
                 # Check cancellation after download
