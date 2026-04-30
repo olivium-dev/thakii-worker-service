@@ -12,10 +12,13 @@ import sys
 import time
 import tempfile
 import subprocess
+import threading
+import traceback
 from pathlib import Path
 import shutil
 import multiprocessing
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, Future
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 import signal
 
 # Import core integrations
@@ -32,13 +35,24 @@ class EnhancedWorker:
         # Mac Mini M2 Optimization: Use multiple cores efficiently
         self.max_concurrent_tasks = int(os.getenv('MAX_CONCURRENT_TASKS', min(multiprocessing.cpu_count(), 3)))
         self.executor = ThreadPoolExecutor(max_workers=self.max_concurrent_tasks)
-        
+
         # Configure intelligent storage selection
         self.temp_base_dir = self._get_temp_storage_path()
-        
-        # Task processing timeout (30 minutes)
-        self.task_timeout = 1800
-        
+
+        # Task processing timeout (30 minutes). Now actually enforced via a
+        # ThreadPoolExecutor wrapper around process_video so a wedged ffmpeg
+        # / Whisper invocation cannot leave the row in 'processing' forever.
+        self.task_timeout = int(os.getenv('TASK_TIMEOUT_SECONDS', '1800'))
+
+        # Heartbeat configuration. The daemon thread wakes every
+        # HEARTBEAT_INTERVAL seconds and pings the backend so the reaper
+        # knows this worker (and the rows it owns) are alive.
+        self.heartbeat_interval = int(os.getenv('WORKER_HEARTBEAT_INTERVAL', '15'))
+        self._active_task_ids = set()
+        self._active_task_lock = threading.Lock()
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread = None
+
         print("🚀 Mac Mini M2 Optimized Worker", flush=True)
         print(f"   API Client: {'✅' if self.api.is_enabled else '❌'}", flush=True)
         print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}", flush=True)
@@ -75,7 +89,87 @@ class EnhancedWorker:
         print(f"   ⚠️  Using system temp (fallback): {system_temp}", flush=True)
         return str(system_temp)
     
+    # ====== Heartbeat / active-task tracking helpers (Phase C1) ======
+
+    def _track_task(self, video_id: str):
+        with self._active_task_lock:
+            self._active_task_ids.add(video_id)
+
+    def _untrack_task(self, video_id: str):
+        with self._active_task_lock:
+            self._active_task_ids.discard(video_id)
+
+    def _snapshot_active_tasks(self):
+        with self._active_task_lock:
+            return list(self._active_task_ids)
+
+    def _heartbeat_loop(self):
+        """Daemon loop. Sends a heartbeat every self.heartbeat_interval
+        seconds with the current active_task_ids snapshot. Keeps running
+        until self._heartbeat_stop is set."""
+        print(f"💓 Heartbeat thread started (interval={self.heartbeat_interval}s)", flush=True)
+        while not self._heartbeat_stop.wait(self.heartbeat_interval):
+            try:
+                if not self.api.is_enabled:
+                    continue
+                self.api.send_heartbeat(active_task_ids=self._snapshot_active_tasks())
+            except Exception as e:
+                print(f"⚠️ Heartbeat error: {e}", flush=True)
+        print("💓 Heartbeat thread stopping", flush=True)
+
+    def start_heartbeat(self):
+        if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+            return
+        self._heartbeat_stop.clear()
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop, name='worker-heartbeat', daemon=True)
+        self._heartbeat_thread.start()
+
+    def stop_heartbeat(self):
+        self._heartbeat_stop.set()
+
+    # ====== Public process_video with timeout enforcement (Phase C2) ======
+
     def process_video(self, video_id: str, s3_key: str = None, filename: str = None, task_details: dict = None) -> bool:
+        """Public entry point. Enforces self.task_timeout by running the
+        actual work in a worker thread and wraps everything in a
+        try/except BaseException crash-to-failed handler (Phase C3) so an
+        uncaught exception or a timeout always marks the row 'failed'
+        instead of leaving it stuck in 'processing'."""
+        self._track_task(video_id)
+        try:
+            with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"task-{video_id}") as inner:
+                future = inner.submit(
+                    self._process_video_impl, video_id, s3_key, filename, task_details)
+                try:
+                    return future.result(timeout=self.task_timeout)
+                except FuturesTimeoutError:
+                    msg = f"task timed out after {self.task_timeout}s"
+                    print(f"⏱️ {video_id}: {msg}", flush=True)
+                    self._mark_failed(video_id, msg)
+                    return False
+        except BaseException as e:  # noqa: BLE001 — we want to catch *anything*
+            tb = traceback.format_exc()
+            msg = f"worker crash: {type(e).__name__}: {e}"
+            print(f"💥 {video_id}: {msg}\n{tb}", flush=True)
+            try:
+                self._mark_failed(video_id, msg)
+            except Exception as inner_err:
+                print(f"⚠️ Failed to mark {video_id} as failed after crash: {inner_err}", flush=True)
+            return False
+        finally:
+            self._untrack_task(video_id)
+
+    def _mark_failed(self, video_id: str, error_message: str):
+        try:
+            if self.api.is_enabled:
+                self.api.update_task_status(video_id, "failed", error_message=error_message)
+            else:
+                self.postgres.update_task_status(video_id, "failed", error_message=error_message)
+        except Exception as e:
+            print(f"⚠️ _mark_failed error for {video_id}: {e}", flush=True)
+
+    def _process_video_impl(self, video_id: str, s3_key: str = None, filename: str = None, task_details: dict = None) -> bool:
         print(f"\n🎯 Processing: {video_id}", flush=True)
         if s3_key:
             print(f"   🔑 S3 Key: {s3_key}", flush=True)
@@ -232,10 +326,15 @@ class EnhancedWorker:
         """Robust polling loop optimized for Mac Mini M2 - No hanging, efficient queuing"""
         print("🔄 Starting robust polling loop (Mac Mini M2 optimized)...", flush=True)
         sys.stdout.flush()
-        
+
+        # Phase C1: start the heartbeat thread before we begin polling so
+        # the very first picked-up task already has a live signal to the
+        # backend reaper.
+        self.start_heartbeat()
+
         poll_interval = int(os.getenv('WORKER_POLL_INTERVAL', 10))
         active_tasks = set()
-        
+
         while True:
             try:
                 # Use API pickup if enabled, otherwise use direct PostgreSQL
@@ -291,6 +390,7 @@ class EnhancedWorker:
                 
             except KeyboardInterrupt:
                 print("\n🛑 Worker stopping gracefully...", flush=True)
+                self.stop_heartbeat()
                 self.executor.shutdown(wait=True, cancel_futures=False)
                 break
             except Exception as e:

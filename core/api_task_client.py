@@ -35,6 +35,12 @@ REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '10'))  # seconds
 MAX_RETRIES = int(os.getenv('MAX_RETRIES', '3'))
 RETRY_DELAY = int(os.getenv('RETRY_DELAY', '2'))  # seconds
 
+# Phase B5/C4: shared secret used by the backend's InternalApiMiddleware to
+# authenticate /internal/* calls. Empty value = the backend gate is dormant
+# (matches our two-phase rollout default).
+INTERNAL_WORKER_SECRET = os.getenv('INTERNAL_WORKER_SECRET', '')
+
+
 class APITaskClient:
     def __init__(self):
         """Initialize API Task Client"""
@@ -42,18 +48,23 @@ class APITaskClient:
         self.worker_id = WORKER_ID
         self.is_enabled = ENABLE_WORKER_API
         self.max_concurrent_tasks = MAX_CONCURRENT_TASKS
-        
-        # Create session for connection pooling
+
+        # Create session for connection pooling.
         self.session = requests.Session()
-        
+        # Attach the shared internal secret to every request the session
+        # makes so each /internal/* call carries the same auth header.
+        if INTERNAL_WORKER_SECRET:
+            self.session.headers.update({'X-Internal-Secret': INTERNAL_WORKER_SECRET})
+
         # Track active tasks
         self.active_tasks = set()
-        
+
         print(f"🔧 API Task Client initialized")
         print(f"   Backend URL: {self.backend_url}")
         print(f"   Worker ID: {self.worker_id}")
         print(f"   API enabled: {self.is_enabled}")
         print(f"   Max concurrent tasks: {self.max_concurrent_tasks}")
+        print(f"   Internal secret: {'configured' if INTERNAL_WORKER_SECRET else 'NOT configured (rollout phase)'}")
     
     def pickup_task(self) -> Optional[Dict[str, Any]]:
         """
@@ -265,43 +276,47 @@ class APITaskClient:
             print(f"❌ Error completing cancellation for {video_id}: {e}")
             return False
     
-    def send_heartbeat(self) -> bool:
+    def send_heartbeat(self, active_task_ids: Optional[List[str]] = None) -> bool:
         """
-        Send heartbeat to backend
-        
+        Send heartbeat to backend so the StaleTaskReaperService can tell
+        this worker is alive. Always sends (even with zero active tasks)
+        so the backend can age out tasks attributed to this worker.
+
+        Args:
+            active_task_ids: optional explicit list. If None, uses the
+                client's tracked active_tasks set.
+
         Returns:
             bool: Success or failure
         """
         if not self.is_enabled:
-            return True  # No need to send heartbeat if API is disabled
-        
-        if not self.active_tasks:
-            return True  # No active tasks to report
-        
+            return True
+
+        ids = list(active_task_ids) if active_task_ids is not None else list(self.active_tasks)
+
         try:
             response = self.session.post(
                 f"{self.backend_url}/internal/worker/heartbeat",
                 json={
                     'worker_id': self.worker_id,
-                    'active_tasks': list(self.active_tasks)
+                    # Canonical name expected by the backend DTO. We keep
+                    # the legacy alias too so a partial deploy still works.
+                    'active_task_ids': ids,
+                    'active_tasks': ids,
                 },
                 timeout=REQUEST_TIMEOUT
             )
-            
-            # Check for successful response
+
             if response.status_code == 200:
                 data = response.json()
                 if data.get('success'):
-                    print(f"💓 Heartbeat sent for {len(self.active_tasks)} active tasks")
                     return True
-            
-            print(f"❌ Failed to send heartbeat")
-            print(f"   Status code: {response.status_code}")
-            print(f"   Response: {response.text}")
-            
+
+            print(f"❌ Failed to send heartbeat: status={response.status_code}, body={response.text[:200]}")
+
         except Exception as e:
             print(f"❌ Error sending heartbeat: {e}")
-        
+
         return False
     
     def get_task_details(self, video_id: str) -> Optional[Dict[str, Any]]:

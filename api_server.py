@@ -404,26 +404,33 @@ def process_video_from_s3():
         except Exception as e:
             print(f"⚠️ Failed to update task status: {e}")
         
-        # Start background processing
+        # Start background processing. The handler MUST mark the row failed
+        # on ANY exception (Phase C3) so a worker crash does not leave the
+        # task wedged in 'processing' until the reaper notices.
         def background_s3_processing():
             try:
                 print(f"🎬 Starting REAL enhanced processing for video {video_id}")
                 print(f"   🔑 S3 Key: {s3_key}")
                 print(f"   📁 Filename: {filename}")
-                
-                # Use REAL enhanced worker logic instead of mock
+
                 from worker import EnhancedWorker
                 worker = EnhancedWorker()
                 success = worker.process_video(video_id, s3_key=s3_key, filename=filename)
-                
+
                 if success:
                     print(f"✅ REAL enhanced processing completed: {video_id}")
                 else:
                     print(f"❌ REAL processing failed: {video_id}")
-                    
-            except Exception as e:
-                print(f"❌ Real processing failed: {e}")
-                postgres_client.update_task_status(video_id, "failed", error=str(e))
+
+            except BaseException as e:  # noqa: BLE001 — catch-all, including SystemExit
+                import traceback as _tb
+                tb = _tb.format_exc()
+                msg = f"background_s3_processing crash: {type(e).__name__}: {e}"
+                print(f"💥 {video_id}: {msg}\n{tb}")
+                try:
+                    postgres_client.update_task_status(video_id, "failed", error=msg)
+                except Exception as inner:
+                    print(f"⚠️ Failed to mark {video_id} failed after crash: {inner}")
         
         import threading
         thread = threading.Thread(target=background_s3_processing)
