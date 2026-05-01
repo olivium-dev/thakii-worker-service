@@ -221,7 +221,10 @@ jobs:
         S3_BUCKET_NAME=thakii-video-storage-1753883631
         AWS_DEFAULT_REGION=us-east-2
         WORKER_POLL_INTERVAL=5
-        MAX_CONCURRENT_TASKS=2
+        # Run one task at a time so each (potentially multi-GB) video
+        # gets the worker's full disk + CPU. Raise once parallel tasks
+        # have headroom on a beefier disk.
+        MAX_CONCURRENT_TASKS=1
         TEMP_DIR=/tmp/thakii-worker
         PATH_PREFIX=/thakii-worker
         ENABLE_REDIS_QUEUE=false
@@ -230,7 +233,14 @@ jobs:
         ENABLE_WORKER_API=true
         WORKER_ID=worker-thakii-03
         WORKER_HEARTBEAT_INTERVAL=15
-        TASK_TIMEOUT_SECONDS=1800
+        # 2 h timeout: whisper-large on a 1-hour lecture (12 GB raw 4K)
+        # is ~30-60 min on Apple silicon; double for safety.
+        TASK_TIMEOUT_SECONDS=7200
+        # Accept the full size range observed in the prod batch (max 12.6 GB).
+        MAX_VIDEO_SIZE_GB=15
+        # Refuse new pickups when free disk drops below this; janitor
+        # has a chance to free space before the next slot runs.
+        MIN_FREE_GB_TO_PICKUP=3
         INTERNAL_WORKER_SECRET=${INTERNAL_WORKER_SECRET}
         DOTENV
         
