@@ -233,14 +233,18 @@ jobs:
         ENABLE_WORKER_API=true
         WORKER_ID=worker-thakii-03
         WORKER_HEARTBEAT_INTERVAL=15
-        # 2 h timeout: whisper-large on a 1-hour lecture (12 GB raw 4K)
-        # is ~30-60 min on Apple silicon; double for safety.
+        # 2 h timeout: whisper-base on MPS for a 1-hour lecture is
+        # ~15-40 min on Apple silicon; CPU was hitting > 2h on 12 GB.
         TASK_TIMEOUT_SECONDS=7200
-        # Accept the full size range observed in the prod batch (max 12.6 GB).
-        MAX_VIDEO_SIZE_GB=15
+        # Accept the full size range observed in the prod batch (max 15.6 GB).
+        MAX_VIDEO_SIZE_GB=20
         # Refuse new pickups when free disk drops below this; janitor
         # has a chance to free space before the next slot runs.
         MIN_FREE_GB_TO_PICKUP=3
+        # Use Apple Metal (MPS) for whisper transcription -- 3-5x faster
+        # than CPU on M2. Fallback: change to "cpu" or remove if it
+        # ever destabilises (worker logs the device on every pickup).
+        WHISPER_DEVICE=mps
         INTERNAL_WORKER_SECRET=${INTERNAL_WORKER_SECRET}
         DOTENV
         

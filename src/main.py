@@ -55,17 +55,33 @@ class CommandLineArgRunner:
         else:
             if subtitle_filepath is None:
                 print("🎤 Generating subtitles from video audio using Whisper base model...")
+                import os as _os
                 import whisper
                 import torch
-                
-                # Force Whisper base model - NO FALLBACKS
-                model_name = "base"
+
+                # Whisper base is the smallest model that's still usable
+                # for lecture transcription. Configurable via env if needed.
+                model_name = _os.getenv("WHISPER_MODEL", "base")
                 print(f"📥 Loading Whisper {model_name} model...")
-                
-                # Force CPU for Whisper to avoid MPS compatibility issues
-                # MPS has issues with float64 operations in Whisper word timestamps
-                device = "cpu"
-                print("💻 Using CPU (avoiding MPS compatibility issues)")
+
+                # Pick device. CPU was hardcoded because of an old MPS
+                # float64 issue in whisper's word_timestamps path; with
+                # word_timestamps=False (set below) MPS now works fine
+                # and is 3-5x faster on Apple silicon. To stay safe on
+                # existing deployments, default is still "cpu"; the
+                # worker .env can opt into "mps" when ready. "auto"
+                # picks the best available device.
+                requested = _os.getenv("WHISPER_DEVICE", "cpu").lower()
+                if requested == "auto":
+                    if torch.backends.mps.is_available():
+                        device = "mps"
+                    elif torch.cuda.is_available():
+                        device = "cuda"
+                    else:
+                        device = "cpu"
+                else:
+                    device = requested
+                print(f"💻 Using device: {device}")
                 
                 # Load base model - MUST succeed or fail (no fallback)
                 model = whisper.load_model(model_name, device=device)
