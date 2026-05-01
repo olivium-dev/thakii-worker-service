@@ -367,11 +367,24 @@ jobs:
         launchctl unload ~/Library/LaunchAgents/com.thakii.api_server.plist 2>/dev/null || echo "API server not loaded"
         launchctl unload ~/Library/LaunchAgents/com.thakii.rq_worker.plist 2>/dev/null || echo "RQ worker not loaded"
         
-        # Kill any running processes
+        # Kill any running processes. Old logic only matched worker.py,
+        # api_server.py, rq_worker.py — but worker.py launches PDF-gen
+        # via `python -m src.main ...`, which does NOT match any of those
+        # patterns. The orphan whisper subprocess therefore survived every
+        # deploy and competed with the new worker for CPU/GPU.
+        # Kill anything matching the project paths or src.main module.
         pkill -f "python.*worker.py" || echo "No worker processes to kill"
         pkill -f "python.*api_server.py" || echo "No API server processes to kill"
         pkill -f "python.*rq_worker.py" || echo "No RQ worker processes to kill"
-        
+        pkill -f "src.main" || echo "No src.main subprocesses to kill"
+        pkill -f "thakii-worker-service" || echo "No thakii-worker-service processes to kill"
+        # Belt-and-braces: pkill -9 anything still alive after 3 s
+        sleep 3
+        pkill -9 -f "src.main" 2>/dev/null
+        pkill -9 -f "python.*worker.py" 2>/dev/null
+        pkill -9 -f "python.*api_server.py" 2>/dev/null
+        pkill -9 -f "python.*rq_worker.py" 2>/dev/null
+
         sleep 5
         
         # Load and start services

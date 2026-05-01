@@ -53,6 +53,12 @@ class EnhancedWorker:
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread = None
 
+        # Maps video_id -> live subprocess.Popen so the outer timeout /
+        # crash handler can terminate the process tree (otherwise an
+        # orphan whisper subprocess keeps running and fights the next
+        # pickup).
+        self._task_subprocesses: dict = {}
+
         # Janitor thread config. The deploy-time cleanup is opportunistic;
         # this background thread is the steady-state safety net that keeps
         # /tmp from filling up between deploys. Defaults sized for a
@@ -238,21 +244,15 @@ class EnhancedWorker:
     # ====== Public process_video with timeout enforcement (Phase C2) ======
 
     def process_video(self, video_id: str, s3_key: str = None, filename: str = None, task_details: dict = None) -> bool:
-        """Public entry point. Enforces self.task_timeout by running the
-        actual work in a single-task ThreadPoolExecutor and wraps the
-        whole thing in a try/except BaseException crash-to-failed handler
-        (Phase C3).
+        """Public entry point. Enforces self.task_timeout via a
+        single-task ThreadPoolExecutor + try/except BaseException
+        crash-to-failed handler.
 
-        IMPORTANT: we do NOT use `with ThreadPoolExecutor(...)` because
-        its __exit__ calls shutdown(wait=True), which would block here
-        forever waiting for the wedged inner thread (Python threads can't
-        be killed). Instead we shutdown(wait=False) after the timeout so
-        the outer call returns immediately, the polling loop's
-        done_callback fires, and active_tasks is correctly decremented.
-        The leaked inner thread will die when its underlying subprocess
-        (_generate_pdf_with_cancellation_check) finishes or the worker
-        process restarts; either way it's no longer holding back new
-        pickups."""
+        Subprocess kill on timeout: _process_video_impl registers any
+        Popen it launches into self._task_subprocesses[video_id]. On
+        timeout, we look it up and kill it -- otherwise an orphan
+        whisper/ffmpeg keeps running and fights the next pickup for
+        CPU/GPU."""
         self._track_task(video_id)
         inner = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"task-{video_id}")
         try:
@@ -263,27 +263,47 @@ class EnhancedWorker:
             except FuturesTimeoutError:
                 msg = f"task timed out after {self.task_timeout}s"
                 print(f"⏱️ {video_id}: {msg}", flush=True)
+                self._kill_task_subprocess(video_id)
                 self._mark_failed(video_id, msg)
                 return False
-        except BaseException as e:  # noqa: BLE001 — we want to catch *anything*
+        except BaseException as e:  # noqa: BLE001 — catch *anything*
             tb = traceback.format_exc()
             msg = f"worker crash: {type(e).__name__}: {e}"
             print(f"💥 {video_id}: {msg}\n{tb}", flush=True)
             try:
+                self._kill_task_subprocess(video_id)
                 self._mark_failed(video_id, msg)
             except Exception as inner_err:
                 print(f"⚠️ Failed to mark {video_id} as failed after crash: {inner_err}", flush=True)
             return False
         finally:
-            # Detach the inner executor without waiting on the wedged
-            # thread. cancel_futures requires Python 3.9+; we already use
-            # newer features so this is safe.
             try:
                 inner.shutdown(wait=False, cancel_futures=True)
             except TypeError:
-                # Defensive fallback for older Python
                 inner.shutdown(wait=False)
             self._untrack_task(video_id)
+            self._task_subprocesses.pop(video_id, None)
+
+    def _register_task_subprocess(self, video_id: str, proc):
+        """Called by _generate_pdf_with_cancellation_check so the outer
+        timeout / crash handler can terminate the process tree."""
+        self._task_subprocesses[video_id] = proc
+
+    def _kill_task_subprocess(self, video_id: str):
+        proc = self._task_subprocesses.get(video_id)
+        if proc is None:
+            return
+        try:
+            if proc.poll() is None:
+                print(f"🔪 Killing subprocess pid={proc.pid} for {video_id}", flush=True)
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+        except Exception as e:
+            print(f"⚠️ Error killing subprocess for {video_id}: {e}", flush=True)
 
     def _mark_failed(self, video_id: str, error_message: str):
         try:
@@ -600,10 +620,22 @@ class EnhancedWorker:
 
         try:
             print(f"🎬 Starting PDF generation. Subprocess log: {log_path}", flush=True)
+            process_start = time.time()
             process = subprocess.Popen([
                 sys.executable, "-u", "-m", "src.main",
                 str(video_path), "-o", str(pdf_path)
             ], stdout=log_fh, stderr=subprocess.STDOUT, cwd=Path(__file__).parent)
+
+            # Register so the outer task_timeout / crash handler can
+            # terminate this process if the inner thread is stuck.
+            self._register_task_subprocess(video_id, process)
+
+            # Periodic-progress signal: every 60 s log the current size
+            # of the per-task log file. Lets the operator distinguish
+            # "subprocess actively writing" (size growing) from
+            # "subprocess wedged" (size flat) without SSH access.
+            last_log_check = time.time()
+            last_log_size = 0
 
             while process.poll() is None:
                 if self._is_cancelled(video_id):
@@ -616,6 +648,22 @@ class EnhancedWorker:
                         process.wait(timeout=5)
                     return False
                 time.sleep(2)
+
+                now = time.time()
+                if now - last_log_check >= 60:
+                    last_log_check = now
+                    try:
+                        current_size = log_path.stat().st_size if log_path.exists() else 0
+                    except OSError:
+                        current_size = 0
+                    delta = current_size - last_log_size
+                    elapsed = int(now - process_start)
+                    print(
+                        f"📈 PDF gen progress for {video_id}: elapsed={elapsed}s "
+                        f"log_size={current_size} (+{delta} bytes since last check)",
+                        flush=True
+                    )
+                    last_log_size = current_size
 
             if process.returncode == 0 and pdf_path.exists():
                 return True
