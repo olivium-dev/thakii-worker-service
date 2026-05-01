@@ -102,10 +102,27 @@ class WorkerS3Client:
             print(f"⚠️ Could not check free space at {parent}: {e}", flush=True)
 
         if size_bytes is not None and free_bytes is not None:
+            file_gb = size_bytes / (1024 ** 3)
+
+            # Hard cap on what this worker accepts. Multi-GB videos take
+            # > 30 min just for whisper transcription on a Mac mini, so
+            # they'd hit our task_timeout anyway and burn a worker slot
+            # for nothing. Refuse them up front with a clear message so
+            # the next (smaller) task gets the slot in 2 seconds, not
+            # after 30 minutes of dead waiting.
+            max_video_gb = float(os.getenv('MAX_VIDEO_SIZE_GB', '2.0'))
+            if file_gb > max_video_gb:
+                self.last_error = (
+                    f"video exceeds per-worker size limit: {file_gb:.2f} GB > "
+                    f"MAX_VIDEO_SIZE_GB={max_video_gb} GB. Process this video "
+                    f"on a worker with more disk + a longer task_timeout."
+                )
+                print(f"❌ {self.last_error}", flush=True)
+                return False
+
             needed = (size_bytes * 2) + (256 * 1024 * 1024)
             free_gb = free_bytes / (1024 ** 3)
             need_gb = needed / (1024 ** 3)
-            file_gb = size_bytes / (1024 ** 3)
             print(f"📦 disk: free={free_gb:.2f} GB, file={file_gb:.2f} GB, headroom_required={need_gb:.2f} GB", flush=True)
             if free_bytes < needed:
                 self.last_error = (
