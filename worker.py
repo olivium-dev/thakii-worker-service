@@ -575,41 +575,73 @@ class EnhancedWorker:
             self.active_tasks.discard(video_id)
 
     def _generate_pdf_with_cancellation_check(self, video_id: str, video_path: Path, pdf_path: Path) -> bool:
-        """Generate PDF with periodic cancellation checks"""
+        """Generate PDF with periodic cancellation checks.
+
+        IMPORTANT: previously this used stdout=PIPE, stderr=PIPE with no
+        reader, so the subprocess (whisper transcription) deadlocked the
+        moment it produced more than the OS pipe buffer (~64 KB on
+        macOS). That's why every >2 GB video stalled at progress=30% for
+        hours, regardless of CPU vs MPS or video size: pipe-buffer
+        overflow, NOT slow inference.
+
+        Now we redirect both streams to a per-task log file living in
+        the same temp dir as the video. No PIPE, no buffer, no deadlock,
+        and we still get all the whisper output for forensics."""
         import subprocess
         import sys
-        
+
+        # Per-task log so the kernel never has to buffer subprocess output.
+        log_path = Path(str(pdf_path) + '.gen.log')
         try:
-            # Start PDF generation process
+            log_fh = open(log_path, 'wb', buffering=0)
+        except Exception as e:
+            print(f"⚠️ Could not open per-task log {log_path}: {e}; falling back to DEVNULL", flush=True)
+            log_fh = subprocess.DEVNULL
+
+        try:
+            print(f"🎬 Starting PDF generation. Subprocess log: {log_path}", flush=True)
             process = subprocess.Popen([
-                sys.executable, "-m", "src.main",
+                sys.executable, "-u", "-m", "src.main",
                 str(video_path), "-o", str(pdf_path)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=Path(__file__).parent)
-            
-            # Poll process and check for cancellation every 2 seconds
+            ], stdout=log_fh, stderr=subprocess.STDOUT, cwd=Path(__file__).parent)
+
             while process.poll() is None:
                 if self._is_cancelled(video_id):
                     print(f"🚫 Cancelling PDF generation for {video_id}", flush=True)
                     process.terminate()
-                    time.sleep(1)
-                    if process.poll() is None:
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
                         process.kill()
+                        process.wait(timeout=5)
                     return False
-                time.sleep(2)  # Check every 2 seconds
-            
-            # Check final result
+                time.sleep(2)
+
             if process.returncode == 0 and pdf_path.exists():
                 return True
-            else:
-                print(f"❌ PDF generation failed with return code: {process.returncode}")
-                if process.stderr:
-                    stderr_output = process.stderr.read().decode()
-                    print(f"   Error output: {stderr_output}")
-                return False
-                
-        except Exception as e:
-            print(f"❌ Error in PDF generation with cancellation check: {e}")
+
+            # Surface the tail of the subprocess log so failure mode is visible.
+            tail = ''
+            try:
+                if log_path.exists():
+                    with open(log_path, 'rb') as f:
+                        f.seek(0, 2)
+                        size = f.tell()
+                        f.seek(max(0, size - 4096))
+                        tail = f.read().decode('utf-8', errors='replace')
+            except Exception:
+                pass
+            print(f"❌ PDF generation failed (rc={process.returncode}). Last 4 KB of log:\n{tail}", flush=True)
             return False
+        except Exception as e:
+            print(f"❌ Error in PDF generation with cancellation check: {e}", flush=True)
+            return False
+        finally:
+            if log_fh not in (None, subprocess.DEVNULL):
+                try:
+                    log_fh.close()
+                except Exception:
+                    pass
 
 def main():
     worker = EnhancedWorker()
