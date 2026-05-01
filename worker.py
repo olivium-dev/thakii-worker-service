@@ -239,22 +239,32 @@ class EnhancedWorker:
 
     def process_video(self, video_id: str, s3_key: str = None, filename: str = None, task_details: dict = None) -> bool:
         """Public entry point. Enforces self.task_timeout by running the
-        actual work in a worker thread and wraps everything in a
-        try/except BaseException crash-to-failed handler (Phase C3) so an
-        uncaught exception or a timeout always marks the row 'failed'
-        instead of leaving it stuck in 'processing'."""
+        actual work in a single-task ThreadPoolExecutor and wraps the
+        whole thing in a try/except BaseException crash-to-failed handler
+        (Phase C3).
+
+        IMPORTANT: we do NOT use `with ThreadPoolExecutor(...)` because
+        its __exit__ calls shutdown(wait=True), which would block here
+        forever waiting for the wedged inner thread (Python threads can't
+        be killed). Instead we shutdown(wait=False) after the timeout so
+        the outer call returns immediately, the polling loop's
+        done_callback fires, and active_tasks is correctly decremented.
+        The leaked inner thread will die when its underlying subprocess
+        (_generate_pdf_with_cancellation_check) finishes or the worker
+        process restarts; either way it's no longer holding back new
+        pickups."""
         self._track_task(video_id)
+        inner = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"task-{video_id}")
         try:
-            with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"task-{video_id}") as inner:
-                future = inner.submit(
-                    self._process_video_impl, video_id, s3_key, filename, task_details)
-                try:
-                    return future.result(timeout=self.task_timeout)
-                except FuturesTimeoutError:
-                    msg = f"task timed out after {self.task_timeout}s"
-                    print(f"⏱️ {video_id}: {msg}", flush=True)
-                    self._mark_failed(video_id, msg)
-                    return False
+            future = inner.submit(
+                self._process_video_impl, video_id, s3_key, filename, task_details)
+            try:
+                return future.result(timeout=self.task_timeout)
+            except FuturesTimeoutError:
+                msg = f"task timed out after {self.task_timeout}s"
+                print(f"⏱️ {video_id}: {msg}", flush=True)
+                self._mark_failed(video_id, msg)
+                return False
         except BaseException as e:  # noqa: BLE001 — we want to catch *anything*
             tb = traceback.format_exc()
             msg = f"worker crash: {type(e).__name__}: {e}"
@@ -265,6 +275,14 @@ class EnhancedWorker:
                 print(f"⚠️ Failed to mark {video_id} as failed after crash: {inner_err}", flush=True)
             return False
         finally:
+            # Detach the inner executor without waiting on the wedged
+            # thread. cancel_futures requires Python 3.9+; we already use
+            # newer features so this is safe.
+            try:
+                inner.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                # Defensive fallback for older Python
+                inner.shutdown(wait=False)
             self._untrack_task(video_id)
 
     def _mark_failed(self, video_id: str, error_message: str):
