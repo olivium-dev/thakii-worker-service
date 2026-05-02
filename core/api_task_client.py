@@ -319,6 +319,28 @@ class APITaskClient:
 
         return False
     
+    def report_progress(self, video_id: str, phase: str, detail: Optional[Dict] = None) -> bool:
+        """Phase 3: report fine-grained progress to /internal/worker/progress."""
+        if not self.is_enabled:
+            return True
+        try:
+            payload: Dict[str, Any] = {
+                'video_id': video_id,
+                'worker_id': self.worker_id,
+                'phase': phase,
+            }
+            if detail is not None:
+                payload['progress_detail'] = json.dumps(detail)
+            resp = self.session.post(
+                f"{self.backend_url}/internal/worker/progress",
+                json=payload,
+                timeout=REQUEST_TIMEOUT,
+            )
+            return resp.status_code == 200
+        except Exception as e:
+            print(f"⚠️ report_progress({video_id}, {phase}) error: {e}", flush=True)
+            return False
+
     def get_task_details(self, video_id: str) -> Optional[Dict[str, Any]]:
         """
         Get task details via API

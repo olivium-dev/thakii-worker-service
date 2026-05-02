@@ -329,7 +329,7 @@ class EnhancedWorker:
     def stop_janitor(self):
         self._janitor_stop.set()
 
-    # ====== Heartbeat / active-task tracking helpers (Phase C1) ======
+    # ====== Heartbeat / active-task / progress tracking helpers ======
 
     def _track_task(self, video_id: str):
         with self._active_task_lock:
@@ -342,6 +342,28 @@ class EnhancedWorker:
     def _snapshot_active_tasks(self):
         with self._active_task_lock:
             return list(self._active_task_ids)
+
+    # ── Phase 3: progress reporting thread ──
+
+    def _progress_loop(self):
+        """Daemon thread: every 15s reads progress.json from each active
+        task's workdir and POSTs to backend /internal/worker/progress."""
+        interval = int(os.getenv('WORKER_PROGRESS_INTERVAL', '15'))
+        print(f"📊 Progress thread started (interval={interval}s)", flush=True)
+        while not self._heartbeat_stop.wait(interval):
+            if not self.use_persistent_workdir:
+                continue
+            for vid in self._snapshot_active_tasks():
+                try:
+                    pf = _workdir_for(vid) / 'progress.json'
+                    if not pf.exists():
+                        continue
+                    data = json.loads(pf.read_text())
+                    phase = data.get('phase', 'unknown')
+                    self.api.report_progress(vid, phase, data)
+                except Exception:
+                    pass
+        print("📊 Progress thread stopping", flush=True)
 
     def _heartbeat_loop(self):
         """Daemon loop. Sends a heartbeat every self.heartbeat_interval
@@ -364,6 +386,10 @@ class EnhancedWorker:
         self._heartbeat_thread = threading.Thread(
             target=self._heartbeat_loop, name='worker-heartbeat', daemon=True)
         self._heartbeat_thread.start()
+        # Phase 3: start progress reporting on the same stop event
+        progress_t = threading.Thread(
+            target=self._progress_loop, name='worker-progress', daemon=True)
+        progress_t.start()
 
     def stop_heartbeat(self):
         self._heartbeat_stop.set()
@@ -516,6 +542,7 @@ class EnhancedWorker:
                     return False
 
                 _mark_stage_done(workdir, 'download')
+                self.api.report_progress(video_id, 'download', {'status': 'done'})
                 print(f"   ✅ Stage download complete for {video_id}", flush=True)
             else:
                 print(f"   ⏭️  Stage download already done for {video_id} (sentinel present)", flush=True)
@@ -536,6 +563,7 @@ class EnhancedWorker:
                     return False
 
                 _mark_stage_done(workdir, 'pdf')
+                self.api.report_progress(video_id, 'pdf', {'status': 'done'})
                 print(f"   ✅ Stage pdf complete for {video_id}", flush=True)
             else:
                 print(f"   ⏭️  Stage pdf already done for {video_id} (sentinel present)", flush=True)
@@ -554,6 +582,7 @@ class EnhancedWorker:
                     return False
 
                 _mark_stage_done(workdir, 'upload')
+                self.api.report_progress(video_id, 'upload', {'status': 'done'})
                 print(f"   ✅ Stage upload complete for {video_id}", flush=True)
             else:
                 bucket = self.s3.bucket_name
