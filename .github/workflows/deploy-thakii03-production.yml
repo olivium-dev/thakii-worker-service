@@ -75,9 +75,8 @@ jobs:
         WDBASE="$WS/workdir"
         if [ -d "$WDBASE" ]; then
           echo "=== Pruning stale persistent workdirs ==="
-          for D in "$WDBASE"/*/; do
-            [ -d "$D" ] || continue
-            if [ -f "${D}lock.json" ]; then
+          find "$WDBASE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | while read D; do
+            if [ -f "${D}/lock.json" ]; then
               echo "  SKIP locked: $D"
               continue
             fi
