@@ -68,7 +68,28 @@ jobs:
         ## process_video should have cleaned but didn't (older than 30 min).
         WS=/Users/fanusdigital/thakii-worker-service
         find "$WS" -maxdepth 3 \( -name '*.mp4' -o -name '*.srt' \) \
+                   -not -path '*/workdir/*' \
                    -type f -mmin +30 -size +10M -delete 2>/dev/null
+
+        ## Persistent workdir: only prune dirs > 24h old AND without lock.json
+        WDBASE="$WS/workdir"
+        if [ -d "$WDBASE" ]; then
+          echo "=== Pruning stale persistent workdirs ==="
+          for D in "$WDBASE"/*/; do
+            [ -d "$D" ] || continue
+            if [ -f "${D}lock.json" ]; then
+              echo "  SKIP locked: $D"
+              continue
+            fi
+            AGE_MIN=$(python3 -c "import os,time; print(int((time.time()-os.path.getmtime('$D'))/60))" 2>/dev/null || echo 0)
+            if [ "$AGE_MIN" -gt 1440 ]; then
+              echo "  PRUNE (age=${AGE_MIN}m): $D"
+              rm -rf "$D"
+            else
+              echo "  KEEP (age=${AGE_MIN}m): $D"
+            fi
+          done
+        fi
         # Direct-upload PDFs created in the worker dir; keep none older than 1 day
         find "$WS" -maxdepth 1 -name 'direct-*.pdf' -mtime +1 -delete 2>/dev/null
         find "$WS" -maxdepth 1 -name 'direct-*.mp4' -mtime +1 -delete 2>/dev/null
@@ -247,6 +268,9 @@ jobs:
         # than CPU on M2. Fallback: change to "cpu" or remove if it
         # ever destabilises (worker logs the device on every pickup).
         WHISPER_DEVICE=mps
+        WORKER_USE_PERSISTENT_WORKDIR=true
+        WORKER_WORKDIR_BASE=/Users/fanusdigital/thakii-worker-service/workdir
+        WORKDIR_RETENTION_HOURS=24
         INTERNAL_WORKER_SECRET=${INTERNAL_WORKER_SECRET}
         DOTENV
         

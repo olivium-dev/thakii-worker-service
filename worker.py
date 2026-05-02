@@ -7,6 +7,7 @@ Optimized Worker for Mac Mini M2 - High Performance Video Processing
 - No fallback code - production ready
 """
 
+import json
 import os
 import sys
 import time
@@ -26,6 +27,99 @@ from core.postgres_integration import postgres_client
 from core.s3_integration import s3_client
 from core.api_task_client import api_client
 
+# ─── Persistent workdir helpers (Phase 1 of Stuck-Task Hardening v3) ────
+
+WORKDIR_BASE = Path(os.getenv(
+    'WORKER_WORKDIR_BASE',
+    os.path.join(os.path.dirname(__file__), 'workdir'),
+))
+
+WORKDIR_RETENTION_HOURS = int(os.getenv('WORKDIR_RETENTION_HOURS', '24'))
+
+STAGES = ('download', 'audio', 'frames', 'transcribe', 'pdf', 'upload')
+
+
+def _workdir_for(video_id: str) -> Path:
+    return WORKDIR_BASE / video_id
+
+
+def _stage_sentinel(workdir: Path, stage: str) -> Path:
+    return workdir / f'.stage.{stage}.done'
+
+
+def _stage_done(workdir: Path, stage: str) -> bool:
+    return _stage_sentinel(workdir, stage).exists()
+
+
+def _mark_stage_done(workdir: Path, stage: str) -> None:
+    sentinel = _stage_sentinel(workdir, stage)
+    tmp = sentinel.with_suffix('.tmp')
+    tmp.write_text(str(time.time()))
+    tmp.rename(sentinel)
+
+
+def _acquire_task_workdir(video_id: str) -> Path:
+    """Create (or re-enter) the persistent workdir for *video_id*.
+    Writes a lock.json with this process's PID so the janitor skips it."""
+    wd = _workdir_for(video_id)
+    wd.mkdir(parents=True, exist_ok=True)
+
+    lock_file = wd / 'lock.json'
+    existing = None
+    if lock_file.exists():
+        try:
+            existing = json.loads(lock_file.read_text())
+        except Exception:
+            pass
+    if existing:
+        old_pid = existing.get('pid')
+        if old_pid and old_pid != os.getpid():
+            try:
+                os.kill(old_pid, 0)
+                print(f"⚠️ workdir {wd} locked by PID {old_pid} — overriding (stale?)", flush=True)
+            except OSError:
+                pass
+
+    lock_payload = json.dumps({
+        'pid': os.getpid(),
+        'video_id': video_id,
+        'acquired_at': time.time(),
+    })
+    tmp_lock = lock_file.with_suffix('.tmp')
+    tmp_lock.write_text(lock_payload)
+    tmp_lock.rename(lock_file)
+    return wd
+
+
+def _release_task_workdir(video_id: str, keep: bool = True) -> None:
+    """Remove the lock.  If *keep* is False, delete the entire workdir now."""
+    wd = _workdir_for(video_id)
+    lock_file = wd / 'lock.json'
+    try:
+        lock_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    if not keep and wd.exists():
+        try:
+            shutil.rmtree(wd, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def _workdir_is_locked(wd: Path) -> bool:
+    lock = wd / 'lock.json'
+    if not lock.exists():
+        return False
+    try:
+        data = json.loads(lock.read_text())
+        pid = data.get('pid')
+        if pid:
+            os.kill(pid, 0)
+            return True
+    except (OSError, json.JSONDecodeError, KeyError):
+        pass
+    return False
+
 class EnhancedWorker:
     def __init__(self):
         self.postgres = postgres_client
@@ -35,6 +129,11 @@ class EnhancedWorker:
         # Mac Mini M2 Optimization: Use multiple cores efficiently
         self.max_concurrent_tasks = int(os.getenv('MAX_CONCURRENT_TASKS', min(multiprocessing.cpu_count(), 3)))
         self.executor = ThreadPoolExecutor(max_workers=self.max_concurrent_tasks)
+
+        # Phase 1: persistent workdir (feature-flagged for rollback)
+        self.use_persistent_workdir = os.getenv('WORKER_USE_PERSISTENT_WORKDIR', 'true').lower() in ('1', 'true', 'yes')
+        if self.use_persistent_workdir:
+            WORKDIR_BASE.mkdir(parents=True, exist_ok=True)
 
         # Configure intelligent storage selection
         self.temp_base_dir = self._get_temp_storage_path()
@@ -78,6 +177,7 @@ class EnhancedWorker:
         print(f"   PostgreSQL: {'✅' if self.postgres.is_available() else '❌'}", flush=True)
         print(f"   S3: {'✅' if self.s3.is_available() else '❌'}", flush=True)
         print(f"   Temp Storage: {self.temp_base_dir}", flush=True)
+        print(f"   Persistent Workdir: {'✅ ' + str(WORKDIR_BASE) if self.use_persistent_workdir else '❌ (using tempdir)'}", flush=True)
         print(f"   Max Concurrent Tasks: {self.max_concurrent_tasks}", flush=True)
         print(f"   CPU Cores: {multiprocessing.cpu_count()}", flush=True)
         sys.stdout.flush()
@@ -149,6 +249,8 @@ class EnhancedWorker:
                     # Only kill things that look like ours
                     if os.path.isdir(path) and not os.path.islink(path):
                         if name.startswith('tmp') or name == 'thakii-worker':
+                            if _workdir_is_locked(Path(path)):
+                                continue
                             try:
                                 bytes_freed += self._dir_size(path)
                                 shutil.rmtree(path, ignore_errors=True)
@@ -165,6 +267,30 @@ class EnhancedWorker:
                                 pass
             except Exception as e:
                 print(f"⚠️ {label} cleanup error in {root}: {e}", flush=True)
+
+        # Phase 1: prune expired persistent workdirs (> WORKDIR_RETENTION_HOURS)
+        if self.use_persistent_workdir and WORKDIR_BASE.is_dir():
+            retention_seconds = WORKDIR_RETENTION_HOURS * 3600
+            try:
+                for wd in WORKDIR_BASE.iterdir():
+                    if not wd.is_dir():
+                        continue
+                    if _workdir_is_locked(wd):
+                        continue
+                    try:
+                        age = now - wd.stat().st_mtime
+                    except OSError:
+                        continue
+                    if age > retention_seconds:
+                        try:
+                            sz = self._dir_size(str(wd))
+                            shutil.rmtree(wd, ignore_errors=True)
+                            bytes_freed += sz
+                            removed_dirs += 1
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"⚠️ {label} workdir cleanup error: {e}", flush=True)
 
         if removed_files or removed_dirs:
             mb = bytes_freed / (1024 * 1024)
@@ -320,145 +446,142 @@ class EnhancedWorker:
             print(f"   🔑 S3 Key: {s3_key}", flush=True)
         if filename:
             print(f"   📁 Filename: {filename}")
-        
+
+        workdir = None
         try:
-            # Check if cancelled before starting
             if self._is_cancelled(video_id):
                 print(f"⚠️ Video {video_id} was cancelled before processing", flush=True)
                 self._handle_cancellation(video_id)
                 return False
-            
-            # Update to processing with 0% progress
+
             if self.api.is_enabled:
                 self.api.update_task_status(video_id, "processing", progress=0)
             else:
                 self.postgres.update_task_status(video_id, "processing")
-            
-            # Get task details (use provided details from API pickup, or fallback to PostgreSQL)
+
             if task_details:
                 task = task_details
             else:
                 task = self.postgres.get_task_details(video_id)
                 if not task:
-                    if self.api.is_enabled:
-                        self.api.update_task_status(video_id, "failed", error_message="Task not found")
-                    else:
-                        self.postgres.update_task_status(video_id, "failed", error_message="Task not found")
+                    self._update_status(video_id, "failed", error_message="Task not found")
                     return False
-            
-            # Prefer parameters, then task fields, then fallback
+
             filename = filename or task.get('filename', f'{video_id}.mp4')
             s3_key = s3_key or task.get('s3_key') or task.get('s3_path')
-            
-            # Use intelligent storage path (external SSD if available, else fallback)
-            with tempfile.TemporaryDirectory(dir=self.temp_base_dir) as temp_dir:
-                temp_path = Path(temp_dir)
-                video_path = temp_path / filename
-                pdf_path = temp_path / f"{video_id}.pdf"
-                
-                print(f"   📁 Using temp directory: {temp_dir}", flush=True)
-                sys.stdout.flush()
-                
-                # Check cancellation before download
+
+            # Phase 1: acquire persistent workdir (or fall back to tempdir)
+            if self.use_persistent_workdir:
+                workdir = _acquire_task_workdir(video_id)
+                print(f"   📁 Persistent workdir: {workdir}", flush=True)
+            else:
+                workdir = Path(tempfile.mkdtemp(dir=self.temp_base_dir))
+                print(f"   📁 Temp workdir: {workdir}", flush=True)
+            sys.stdout.flush()
+
+            video_path = workdir / filename
+            pdf_path = workdir / f"{video_id}.pdf"
+
+            # ── Stage: download ──
+            if not _stage_done(workdir, 'download'):
                 if self._is_cancelled(video_id):
                     self._handle_cancellation(video_id)
                     return False
-                
-                # Update progress to 10% - Starting download
-                if self.api.is_enabled:
-                    self.api.update_task_status(video_id, "processing", progress=10)
-                else:
-                    self.postgres.update_task_status(video_id, "processing")
-                
-                # Pre-task disk hygiene: if we're tight on space, run an
-                # emergency janitor sweep BEFORE asking S3 for the file.
-                # Better to free 30 GB of stale partials than to fail a
-                # 12 GB download halfway through and leak disk.
-                pre_free_gb = self._get_free_gb(self.temp_base_dir)
+
+                self._update_status(video_id, "processing", progress=10)
+
+                pre_free_gb = self._get_free_gb(str(workdir))
                 if pre_free_gb < self.min_free_gb_to_pickup:
                     print(f"⚠️ Free {pre_free_gb:.2f} GB < threshold {self.min_free_gb_to_pickup} GB; emergency sweep", flush=True)
                     self._cleanup_temp_files(max_age_seconds=60, label='pre-task')
 
-                # Download video (use exact s3_key if available). Build a
-                # detailed error message so operators can tell at a glance
-                # whether it was permissions, disk, network, etc.
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
                     detail = getattr(self.s3, 'last_error', None) or 'unknown error'
                     err = f"Download failed (s3_key={s3_key}, file={filename}): {detail}"
                     print(f"❌ {err}", flush=True)
-                    if self.api.is_enabled:
-                        self.api.update_task_status(video_id, "failed", error_message=err)
-                    else:
-                        self.postgres.update_task_status(video_id, "failed", error_message=err)
+                    self._update_status(video_id, "failed", error_message=err)
                     return False
-                
-                # Check cancellation after download
+
+                _mark_stage_done(workdir, 'download')
+                print(f"   ✅ Stage download complete for {video_id}", flush=True)
+            else:
+                print(f"   ⏭️  Stage download already done for {video_id} (sentinel present)", flush=True)
+
+            # ── Stage: PDF generation (covers audio + frames + transcribe + pdf) ──
+            if not _stage_done(workdir, 'pdf'):
                 if self._is_cancelled(video_id):
                     self._handle_cancellation(video_id)
                     return False
-                
-                # Update progress to 30% - Download complete, starting PDF generation
-                if self.api.is_enabled:
-                    self.api.update_task_status(video_id, "processing", progress=30)
-                else:
-                    self.postgres.update_task_status(video_id, "processing")
-                
-                # Generate PDF with superior algorithms
+
+                self._update_status(video_id, "processing", progress=30)
+
                 if not self._generate_pdf_with_cancellation_check(video_id, video_path, pdf_path):
-                    # Check if it was cancelled or failed
                     if self._is_cancelled(video_id):
                         self._handle_cancellation(video_id)
                     else:
-                        if self.api.is_enabled:
-                            self.api.update_task_status(video_id, "failed", error_message="PDF generation failed")
-                        else:
-                            self.postgres.update_task_status(video_id, "failed", error_message="PDF generation failed")
+                        self._update_status(video_id, "failed", error_message="PDF generation failed")
                     return False
-                
-                # Check cancellation before upload
+
+                _mark_stage_done(workdir, 'pdf')
+                print(f"   ✅ Stage pdf complete for {video_id}", flush=True)
+            else:
+                print(f"   ⏭️  Stage pdf already done for {video_id} (sentinel present)", flush=True)
+
+            # ── Stage: upload ──
+            if not _stage_done(workdir, 'upload'):
                 if self._is_cancelled(video_id):
                     self._handle_cancellation(video_id)
                     return False
-                
-                # Update progress to 80% - PDF generated, starting upload
-                if self.api.is_enabled:
-                    self.api.update_task_status(video_id, "processing", progress=80)
-                else:
-                    self.postgres.update_task_status(video_id, "processing")
-                
-                # Upload PDF
+
+                self._update_status(video_id, "processing", progress=80)
+
                 pdf_url = self.s3.upload_pdf(str(pdf_path), video_id)
                 if not pdf_url:
-                    if self.api.is_enabled:
-                        self.api.update_task_status(video_id, "failed", error_message="Upload failed")
-                    else:
-                        self.postgres.update_task_status(video_id, "failed", error_message="Upload failed")
+                    self._update_status(video_id, "failed", error_message="Upload failed")
                     return False
-                
-                # Final cancellation check
-                if self._is_cancelled(video_id):
-                    # Clean up uploaded PDF
-                    try:
-                        self.s3.delete_file(f"pdfs/{video_id}.pdf")
-                    except:
-                        pass
-                    self._handle_cancellation(video_id)
-                    return False
-                
-                # Mark completed with 100% progress
-                if self.api.is_enabled:
-                    self.api.update_task_status(video_id, "done", pdf_url=pdf_url, progress=100)
-                else:
-                    self.postgres.update_task_status(video_id, "done", pdf_url=pdf_url)
-                print(f"🎉 Success: {video_id}")
-                return True
-                
-        except Exception as e:
-            if self.api.is_enabled:
-                self.api.update_task_status(video_id, "failed", error_message=str(e))
+
+                _mark_stage_done(workdir, 'upload')
+                print(f"   ✅ Stage upload complete for {video_id}", flush=True)
             else:
-                self.postgres.update_task_status(video_id, "failed", error_message=str(e))
+                bucket = self.s3.bucket_name
+                region = os.getenv('AWS_DEFAULT_REGION', 'us-east-2')
+                pdf_url = f"https://{bucket}.s3.{region}.amazonaws.com/pdfs/{video_id}/{video_id}.pdf"
+                print(f"   ⏭️  Stage upload already done for {video_id} (sentinel present)", flush=True)
+
+            if self._is_cancelled(video_id):
+                try:
+                    self.s3.delete_file(f"pdfs/{video_id}.pdf")
+                except Exception:
+                    pass
+                self._handle_cancellation(video_id)
+                return False
+
+            self._update_status(video_id, "done", pdf_url=pdf_url, progress=100)
+            print(f"🎉 Success: {video_id}", flush=True)
+            return True
+
+        except Exception as e:
+            self._update_status(video_id, "failed", error_message=str(e))
             return False
+        finally:
+            if workdir:
+                if self.use_persistent_workdir:
+                    _release_task_workdir(video_id, keep=True)
+                else:
+                    try:
+                        shutil.rmtree(workdir, ignore_errors=True)
+                    except Exception:
+                        pass
+
+    def _update_status(self, video_id: str, status: str, **kwargs):
+        """Thin wrapper — routes through API when enabled, else Postgres."""
+        try:
+            if self.api.is_enabled:
+                self.api.update_task_status(video_id, status, **kwargs)
+            else:
+                self.postgres.update_task_status(video_id, status, **kwargs)
+        except Exception as e:
+            print(f"⚠️ _update_status({video_id}, {status}) error: {e}", flush=True)
     
     def _generate_superior_pdf(self, video_path: Path, pdf_path: Path) -> bool:
         try:
