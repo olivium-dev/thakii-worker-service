@@ -138,10 +138,11 @@ class EnhancedWorker:
         # Configure intelligent storage selection
         self.temp_base_dir = self._get_temp_storage_path()
 
-        # Task processing timeout (30 minutes). Now actually enforced via a
-        # ThreadPoolExecutor wrapper around process_video so a wedged ffmpeg
-        # / Whisper invocation cannot leave the row in 'processing' forever.
+        # Global task timeout ceiling. Phase 2 adaptive timeouts from the
+        # backend can lower this per-task; this is the fallback / max.
         self.task_timeout = int(os.getenv('TASK_TIMEOUT_SECONDS', '1800'))
+        self.timeout_floor = int(os.getenv('WORKER_TIMEOUT_FLOOR_SECONDS', '900'))
+        self.timeout_ceiling = int(os.getenv('WORKER_TIMEOUT_CEILING_SECONDS', str(self.task_timeout)))
 
         # Heartbeat configuration. The daemon thread wakes every
         # HEARTBEAT_INTERVAL seconds and pings the backend so the reaper
@@ -380,12 +381,24 @@ class EnhancedWorker:
         whisper/ffmpeg keeps running and fights the next pickup for
         CPU/GPU."""
         self._track_task(video_id)
+
+        # Phase 2: per-task adaptive timeout from backend hint
+        effective_timeout = self.task_timeout
+        if task_details:
+            hint = task_details.get('timeout_seconds_hint')
+            if hint is not None:
+                try:
+                    effective_timeout = max(self.timeout_floor, min(int(hint), self.timeout_ceiling))
+                    print(f"⏱️ {video_id}: adaptive timeout={effective_timeout}s (hint={hint}, floor={self.timeout_floor}, ceil={self.timeout_ceiling})", flush=True)
+                except (ValueError, TypeError):
+                    pass
+
         inner = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"task-{video_id}")
         try:
             future = inner.submit(
                 self._process_video_impl, video_id, s3_key, filename, task_details)
             try:
-                return future.result(timeout=self.task_timeout)
+                return future.result(timeout=effective_timeout)
             except FuturesTimeoutError:
                 msg = f"task timed out after {self.task_timeout}s"
                 print(f"⏱️ {video_id}: {msg}", flush=True)
