@@ -341,6 +341,24 @@ class APITaskClient:
             print(f"⚠️ report_progress({video_id}, {phase}) error: {e}", flush=True)
             return False
 
+    def peek_next_task(self) -> Optional[Dict[str, Any]]:
+        """Phase 7: read-only peek at next task candidate for prefetch."""
+        if not self.is_enabled:
+            return None
+        try:
+            resp = self.session.post(
+                f"{self.backend_url}/internal/worker/peek-next",
+                json={'worker_id': self.worker_id},
+                timeout=REQUEST_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('success') and 'task' in data:
+                    return data['task']
+            return None
+        except Exception:
+            return None
+
     def get_task_details(self, video_id: str) -> Optional[Dict[str, Any]]:
         """
         Get task details via API

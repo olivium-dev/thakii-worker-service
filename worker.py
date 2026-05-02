@@ -138,6 +138,10 @@ class EnhancedWorker:
         # Phase 6: run frames extraction + transcription in parallel
         self.parallel_stages = os.getenv('WORKER_PARALLEL_STAGES', 'false').lower() in ('1', 'true', 'yes')
 
+        # Phase 7: prefetch download for N+1 while transcribing N
+        self.prefetch_concurrency = int(os.getenv('WORKER_PREFETCH_CONCURRENCY', '0'))
+        self._prefetched: set = set()
+
         # Configure intelligent storage selection
         self.temp_base_dir = self._get_temp_storage_path()
 
@@ -697,6 +701,12 @@ class EnhancedWorker:
                     
                     if tasks_picked > 0:
                         print(f"📊 Batch pickup complete: {tasks_picked} tasks, {len(active_tasks)} now active", flush=True)
+                        # Phase 7: prefetch next while current task runs
+                        if self.prefetch_concurrency > 0 and len(active_tasks) > 0:
+                            threading.Thread(
+                                target=self._try_prefetch_next,
+                                name='prefetch', daemon=True
+                            ).start()
                 else:
                     # Fallback to direct PostgreSQL polling
                     pending_tasks = self.postgres.get_pending_tasks(limit=self.max_concurrent_tasks * 2)
@@ -767,6 +777,38 @@ class EnhancedWorker:
         # Remove from active tasks if tracking
         if hasattr(self, 'active_tasks'):
             self.active_tasks.discard(video_id)
+
+    def _try_prefetch_next(self):
+        """Phase 7: peek the next task and pre-download its video into a
+        persistent workdir so it's ready when the worker picks it up."""
+        if self.prefetch_concurrency <= 0 or not self.use_persistent_workdir:
+            return
+        if self._get_free_gb(str(WORKDIR_BASE)) < self.min_free_gb_to_pickup * 2:
+            return
+        try:
+            task = self.api.peek_next_task()
+            if not task:
+                return
+            vid = task.get('video_id')
+            if not vid or vid in self._prefetched:
+                return
+            wd = _workdir_for(vid)
+            if _stage_done(wd, 'download'):
+                self._prefetched.add(vid)
+                return
+            wd.mkdir(parents=True, exist_ok=True)
+            filename = task.get('filename', f'{vid}.mp4')
+            s3_key = task.get('s3_key') or task.get('s3_path')
+            video_path = wd / filename
+            print(f"📥 Prefetch: downloading {vid} to {wd}", flush=True)
+            if self.s3.download_video(vid, str(video_path), s3_key=s3_key):
+                _mark_stage_done(wd, 'download')
+                self._prefetched.add(vid)
+                print(f"✅ Prefetch complete: {vid}", flush=True)
+            else:
+                print(f"⚠️ Prefetch download failed for {vid}", flush=True)
+        except Exception as e:
+            print(f"⚠️ Prefetch error: {e}", flush=True)
 
     def _run_parallel_pdf_stages(self, video_id: str, video_path: Path,
                                 pdf_path: Path) -> bool:
