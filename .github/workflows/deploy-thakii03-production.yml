@@ -233,9 +233,11 @@ jobs:
         ENABLE_WORKER_API=true
         WORKER_ID=worker-thakii-03
         WORKER_HEARTBEAT_INTERVAL=15
-        # 2 h timeout: whisper-base on MPS for a 1-hour lecture is
-        # ~15-40 min on Apple silicon; CPU was hitting > 2h on 12 GB.
-        TASK_TIMEOUT_SECONDS=7200
+        # 5 h timeout: large lecture videos (2h+) need 60-180 min of
+        # Whisper transcription on MPS. The old 7200s (2h) wall killed
+        # every video > ~90 min. Phase 2 will replace this with an
+        # adaptive per-video hint; this is the safe ceiling until then.
+        TASK_TIMEOUT_SECONDS=18000
         # Accept the full size range observed in the prod batch (max 15.6 GB).
         MAX_VIDEO_SIZE_GB=20
         # Refuse new pickups when free disk drops below this; janitor
