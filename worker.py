@@ -135,6 +135,9 @@ class EnhancedWorker:
         if self.use_persistent_workdir:
             WORKDIR_BASE.mkdir(parents=True, exist_ok=True)
 
+        # Phase 6: run frames extraction + transcription in parallel
+        self.parallel_stages = os.getenv('WORKER_PARALLEL_STAGES', 'false').lower() in ('1', 'true', 'yes')
+
         # Configure intelligent storage selection
         self.temp_base_dir = self._get_temp_storage_path()
 
@@ -555,7 +558,13 @@ class EnhancedWorker:
 
                 self._update_status(video_id, "processing", progress=30)
 
-                if not self._generate_pdf_with_cancellation_check(video_id, video_path, pdf_path):
+                if self.parallel_stages and self.use_persistent_workdir:
+                    # Phase 6: run frames + transcribe in parallel, then build-pdf
+                    ok = self._run_parallel_pdf_stages(video_id, video_path, pdf_path)
+                else:
+                    ok = self._generate_pdf_with_cancellation_check(video_id, video_path, pdf_path)
+
+                if not ok:
                     if self._is_cancelled(video_id):
                         self._handle_cancellation(video_id)
                     else:
@@ -758,6 +767,69 @@ class EnhancedWorker:
         # Remove from active tasks if tracking
         if hasattr(self, 'active_tasks'):
             self.active_tasks.discard(video_id)
+
+    def _run_parallel_pdf_stages(self, video_id: str, video_path: Path,
+                                pdf_path: Path) -> bool:
+        """Phase 6: run extract-frames (CPU) + transcribe (GPU) in parallel,
+        then build-pdf sequentially."""
+        from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed
+
+        print(f"   🔀 Parallel stages: extract-frames + transcribe for {video_id}", flush=True)
+        with _TPE(max_workers=2, thread_name_prefix=f"par-{video_id[:8]}") as pool:
+            futures = {
+                pool.submit(self._run_phase_subprocess, video_id, video_path, pdf_path, "extract-frames"): "extract-frames",
+                pool.submit(self._run_phase_subprocess, video_id, video_path, pdf_path, "transcribe"): "transcribe",
+            }
+            for fut in as_completed(futures):
+                phase_name = futures[fut]
+                try:
+                    ok = fut.result()
+                    if not ok:
+                        print(f"   ❌ Parallel phase {phase_name} failed for {video_id}", flush=True)
+                        return False
+                    print(f"   ✅ Parallel phase {phase_name} done for {video_id}", flush=True)
+                except Exception as e:
+                    print(f"   ❌ Parallel phase {phase_name} error: {e}", flush=True)
+                    return False
+
+        # Sequential: build PDF from frames + transcript
+        print(f"   📄 Building PDF for {video_id}", flush=True)
+        return self._run_phase_subprocess(video_id, video_path, pdf_path, "build-pdf")
+
+    def _run_phase_subprocess(self, video_id: str, video_path: Path,
+                              pdf_path: Path, phase: str) -> bool:
+        """Run a single phase of src.main as a subprocess. Returns True on success."""
+        workdir = pdf_path.parent if self.use_persistent_workdir else None
+        log_path = Path(str(pdf_path) + f'.{phase}.log')
+        try:
+            log_fh = open(log_path, 'wb', buffering=0)
+        except Exception:
+            log_fh = subprocess.DEVNULL
+
+        try:
+            cmd = [sys.executable, "-u", "-m", "src.main",
+                   str(video_path), "-o", str(pdf_path),
+                   "--phase", phase]
+            if workdir:
+                cmd.extend(["--workdir", str(workdir)])
+                if phase == "transcribe":
+                    cmd.append("--resume")
+
+            proc = subprocess.Popen(
+                cmd, stdout=log_fh, stderr=subprocess.STDOUT,
+                cwd=Path(__file__).parent)
+            self._register_task_subprocess(video_id, proc)
+            proc.wait()
+            return proc.returncode == 0
+        except Exception as e:
+            print(f"❌ Phase {phase} error for {video_id}: {e}", flush=True)
+            return False
+        finally:
+            if log_fh not in (None, subprocess.DEVNULL):
+                try:
+                    log_fh.close()
+                except Exception:
+                    pass
 
     def _generate_pdf_with_cancellation_check(self, video_id: str, video_path: Path, pdf_path: Path) -> bool:
         """Generate PDF with periodic cancellation checks.

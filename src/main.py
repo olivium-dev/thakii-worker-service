@@ -71,6 +71,13 @@ class CommandLineArgRunner:
             action="store_true",
             help="Resume transcription from transcript.partial.json if present",
         )
+        self.parser.add_argument(
+            "--phase",
+            type=str,
+            default=None,
+            choices=["extract-frames", "transcribe", "build-pdf"],
+            help="Run only one phase. Default: full pipeline.",
+        )
 
     def run(self, args):
         opts = self.parser.parse_args(args)
@@ -81,11 +88,24 @@ class CommandLineArgRunner:
         is_skip_subtitles = opts.skip_subtitles
         workdir = Path(opts.workdir) if opts.workdir else None
         resume = opts.resume
+        phase = opts.phase
 
         if is_skip_subtitles and subtitle_filepath is not None:
             print("Omit the -S / --skip-subtitles flag to add subtitles to pdf")
             raise AssertionError()
 
+        # Phase 6: subcommand dispatch
+        if phase == "extract-frames":
+            self._run_extract_frames(video_filepath, workdir)
+            return
+        elif phase == "transcribe":
+            self._transcribe_with_resume(video_filepath, workdir, resume)
+            return
+        elif phase == "build-pdf":
+            self._run_build_pdf(video_filepath, output_filepath, workdir)
+            return
+
+        # Default: full pipeline (backward compat)
         video_segment_finder = VideoSegmentFinder()
 
         if is_skip_subtitles:
@@ -281,6 +301,79 @@ class CommandLineArgRunner:
 
         print(f"✅ SRT saved: {srt_path} ({len(segments)} segments)", flush=True)
         return srt_path
+
+    # ── Phase 6: subcommand implementations ──────────────────────────
+
+    def _run_extract_frames(self, video_filepath: str, workdir: Path | None):
+        """Extract key frames and save manifest to workdir/frames.json."""
+        import pickle
+        _write_progress(workdir, 'frames', {'status': 'extracting'})
+        video_segment_finder = VideoSegmentFinder()
+        print("🖼️  Extracting frames...", flush=True)
+        selected_frames_data = video_segment_finder.get_best_segment_frames(video_filepath)
+        frame_nums = sorted(selected_frames_data.keys())
+        print(f"✅ Extracted {len(frame_nums)} frames", flush=True)
+
+        if workdir:
+            frames_pkl = workdir / 'frames.pkl'
+            tmp = frames_pkl.with_suffix('.tmp')
+            with open(tmp, 'wb') as f:
+                pickle.dump(selected_frames_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            tmp.rename(frames_pkl)
+            print(f"✅ Frames saved to {frames_pkl}", flush=True)
+
+        _write_progress(workdir, 'frames', {'status': 'done', 'count': len(frame_nums)})
+
+    def _run_build_pdf(self, video_filepath: str, output_filepath: str,
+                       workdir: Path | None):
+        """Build PDF from saved frames + transcript."""
+        import pickle
+        _write_progress(workdir, 'pdf', {'status': 'building'})
+
+        # Load frames
+        frames_pkl = workdir / 'frames.pkl' if workdir else None
+        if frames_pkl and frames_pkl.exists():
+            with open(frames_pkl, 'rb') as f:
+                selected_frames_data = pickle.load(f)
+            print(f"📦 Loaded frames from {frames_pkl}", flush=True)
+        else:
+            print("🖼️  Frames not cached; extracting on the fly...", flush=True)
+            video_segment_finder = VideoSegmentFinder()
+            selected_frames_data = video_segment_finder.get_best_segment_frames(video_filepath)
+
+        frame_nums = sorted(selected_frames_data.keys())
+        selected_frames = [selected_frames_data[i]["frame"] for i in frame_nums]
+
+        # Load transcript
+        transcript_path = workdir / 'transcript.json' if workdir else None
+        srt_path = video_filepath.rsplit(".", 1)[0] + ".srt"
+
+        if transcript_path and transcript_path.exists():
+            data = json.loads(transcript_path.read_text())
+            self._segments_to_srt(data['segments'], video_filepath)
+            subtitle_parser = SubtitleSRTParser(srt_path)
+        elif Path(srt_path).exists():
+            subtitle_parser = SubtitleSRTParser(srt_path)
+        else:
+            print("⚠️  No transcript found; generating PDF without subtitles", flush=True)
+            video_subtitle_pages = [ContentSegment(frame, None) for frame in selected_frames]
+            printer = ContentSegmentPdfBuilder()
+            printer.generate_pdf(video_subtitle_pages, output_filepath)
+            return
+
+        segment_finder = SubtitleSegmentFinder(subtitle_parser.get_subtitle_parts())
+        subtitle_breaks = [selected_frames_data[i]["timestamp"] for i in frame_nums]
+        segments = segment_finder.get_subtitle_segments(subtitle_breaks)
+
+        video_subtitle_pages = []
+        for i in range(len(selected_frames)):
+            video_subtitle_pages.append(ContentSegment(selected_frames[i], segments[i]))
+
+        print("Generating PDF file", flush=True)
+        printer = ContentSegmentPdfBuilder()
+        printer.generate_pdf(video_subtitle_pages, output_filepath)
+        _write_progress(workdir, 'pdf', {'status': 'done'})
+        print(f"✅ PDF generated: {output_filepath}", flush=True)
 
     def __generate_pdf_with_subtitles__(
         self, video_segment_finder, video_filepath, subtitle_parser, output_filepath
