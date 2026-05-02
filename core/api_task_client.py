@@ -163,6 +163,9 @@ class APITaskClient:
         
         if 'error_message' in kwargs:
             update_data['error_message'] = kwargs['error_message']
+
+        if 'stage_durations' in kwargs and kwargs['stage_durations']:
+            update_data['stage_durations'] = kwargs['stage_durations']
         
         # Try to update task with retries
         for attempt in range(MAX_RETRIES):

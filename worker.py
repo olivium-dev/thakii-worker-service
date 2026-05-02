@@ -527,6 +527,7 @@ class EnhancedWorker:
 
             video_path = workdir / filename
             pdf_path = workdir / f"{video_id}.pdf"
+            stage_timings: dict = {}
 
             # ── Stage: download ──
             if not _stage_done(workdir, 'download'):
@@ -541,16 +542,18 @@ class EnhancedWorker:
                     print(f"⚠️ Free {pre_free_gb:.2f} GB < threshold {self.min_free_gb_to_pickup} GB; emergency sweep", flush=True)
                     self._cleanup_temp_files(max_age_seconds=60, label='pre-task')
 
+                t_dl = time.time()
                 if not self.s3.download_video(video_id, str(video_path), s3_key=s3_key):
                     detail = getattr(self.s3, 'last_error', None) or 'unknown error'
                     err = f"Download failed (s3_key={s3_key}, file={filename}): {detail}"
                     print(f"❌ {err}", flush=True)
                     self._update_status(video_id, "failed", error_message=err)
                     return False
+                stage_timings['download'] = int(time.time() - t_dl)
 
                 _mark_stage_done(workdir, 'download')
                 self.api.report_progress(video_id, 'download', {'status': 'done'})
-                print(f"   ✅ Stage download complete for {video_id}", flush=True)
+                print(f"   ✅ Stage download complete for {video_id} ({stage_timings['download']}s)", flush=True)
             else:
                 print(f"   ⏭️  Stage download already done for {video_id} (sentinel present)", flush=True)
 
@@ -562,11 +565,12 @@ class EnhancedWorker:
 
                 self._update_status(video_id, "processing", progress=30)
 
+                t_pdf = time.time()
                 if self.parallel_stages and self.use_persistent_workdir:
-                    # Phase 6: run frames + transcribe in parallel, then build-pdf
                     ok = self._run_parallel_pdf_stages(video_id, video_path, pdf_path)
                 else:
                     ok = self._generate_pdf_with_cancellation_check(video_id, video_path, pdf_path)
+                stage_timings['pdf'] = int(time.time() - t_pdf)
 
                 if not ok:
                     if self._is_cancelled(video_id):
@@ -589,14 +593,16 @@ class EnhancedWorker:
 
                 self._update_status(video_id, "processing", progress=80)
 
+                t_up = time.time()
                 pdf_url = self.s3.upload_pdf(str(pdf_path), video_id)
                 if not pdf_url:
                     self._update_status(video_id, "failed", error_message="Upload failed")
                     return False
+                stage_timings['upload'] = int(time.time() - t_up)
 
                 _mark_stage_done(workdir, 'upload')
                 self.api.report_progress(video_id, 'upload', {'status': 'done'})
-                print(f"   ✅ Stage upload complete for {video_id}", flush=True)
+                print(f"   ✅ Stage upload complete for {video_id} ({stage_timings['upload']}s)", flush=True)
             else:
                 bucket = self.s3.bucket_name
                 region = os.getenv('AWS_DEFAULT_REGION', 'us-east-2')
@@ -611,8 +617,9 @@ class EnhancedWorker:
                 self._handle_cancellation(video_id)
                 return False
 
-            self._update_status(video_id, "done", pdf_url=pdf_url, progress=100)
-            print(f"🎉 Success: {video_id}", flush=True)
+            self._update_status(video_id, "done", pdf_url=pdf_url, progress=100,
+                               stage_durations=stage_timings if stage_timings else None)
+            print(f"🎉 Success: {video_id} (timings: {stage_timings})", flush=True)
             return True
 
         except Exception as e:
