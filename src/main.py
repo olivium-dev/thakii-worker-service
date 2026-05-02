@@ -1,10 +1,37 @@
+import json
+import os
 import sys
+import time
+import tempfile
 import argparse
+from pathlib import Path
 from .subtitle_segment_finder import SubtitleSegmentFinder
 from .subtitle_webvtt_parser import SubtitleWebVTTParser
 from .subtitle_srt_parser import SubtitleSRTParser
 from .video_segment_finder import VideoSegmentFinder
 from .content_segment_exporter import ContentSegment, ContentSegmentPdfBuilder
+
+# Phase 5: chunk size for resumable transcription.  Each chunk is
+# transcribed independently and appended to transcript.partial.json.
+# On resume, already-completed chunks are skipped.
+TRANSCRIBE_CHUNK_SECONDS = int(os.getenv('TRANSCRIBE_CHUNK_SECONDS', '300'))
+
+
+def _atomic_json_write(path: Path, data):
+    """Write JSON atomically via tmp + rename (same-device guaranteed)."""
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(data, ensure_ascii=False, default=str))
+    tmp.rename(path)
+
+
+def _write_progress(workdir: Path | None, phase: str, detail: dict):
+    """Write progress.json sidecar for the progress thread to pick up."""
+    if workdir is None:
+        return
+    try:
+        _atomic_json_write(workdir / 'progress.json', {'phase': phase, **detail})
+    except Exception:
+        pass
 
 
 class CommandLineArgRunner:
@@ -33,6 +60,17 @@ class CommandLineArgRunner:
             default="output.pdf",
             help="Output file to generated pdf",
         )
+        self.parser.add_argument(
+            "--workdir",
+            type=str,
+            default=None,
+            help="Persistent workdir for sidecars (progress.json, transcript.partial.json)",
+        )
+        self.parser.add_argument(
+            "--resume",
+            action="store_true",
+            help="Resume transcription from transcript.partial.json if present",
+        )
 
     def run(self, args):
         opts = self.parser.parse_args(args)
@@ -41,6 +79,8 @@ class CommandLineArgRunner:
         subtitle_filepath = opts.subtitle
         output_filepath = opts.output
         is_skip_subtitles = opts.skip_subtitles
+        workdir = Path(opts.workdir) if opts.workdir else None
+        resume = opts.resume
 
         if is_skip_subtitles and subtitle_filepath is not None:
             print("Omit the -S / --skip-subtitles flag to add subtitles to pdf")
@@ -54,43 +94,109 @@ class CommandLineArgRunner:
             )
         else:
             if subtitle_filepath is None:
-                print("🎤 Generating subtitles from video audio using Whisper base model...")
-                import os as _os
-                import whisper
-                import torch
+                srt_path = self._transcribe_with_resume(
+                    video_filepath, workdir, resume)
+                subtitle_parser = SubtitleSRTParser(srt_path)
+            elif subtitle_filepath.endswith(".srt"):
+                subtitle_parser = SubtitleSRTParser(subtitle_filepath)
+            else:
+                subtitle_parser = SubtitleWebVTTParser(subtitle_filepath)
 
-                # Whisper base is the smallest model that's still usable
-                # for lecture transcription. Configurable via env if needed.
-                model_name = _os.getenv("WHISPER_MODEL", "base")
-                print(f"📥 Loading Whisper {model_name} model...")
+            _write_progress(workdir, 'pdf', {'status': 'building'})
+            self.__generate_pdf_with_subtitles__(
+                video_segment_finder, video_filepath, subtitle_parser, output_filepath
+            )
 
-                # Pick device. CPU was hardcoded because of an old MPS
-                # float64 issue in whisper's word_timestamps path; with
-                # word_timestamps=False (set below) MPS now works fine
-                # and is 3-5x faster on Apple silicon. To stay safe on
-                # existing deployments, default is still "cpu"; the
-                # worker .env can opt into "mps" when ready. "auto"
-                # picks the best available device.
-                requested = _os.getenv("WHISPER_DEVICE", "cpu").lower()
-                if requested == "auto":
-                    if torch.backends.mps.is_available():
-                        device = "mps"
-                    elif torch.cuda.is_available():
-                        device = "cuda"
-                    else:
-                        device = "cpu"
-                else:
-                    device = requested
-                print(f"💻 Using device: {device}")
-                
-                # Load base model - MUST succeed or fail (no fallback)
-                model = whisper.load_model(model_name, device=device)
-                print(f"✅ Whisper {model_name} model loaded on {device}")
-                
-                # Transcribe with optimal settings for Mac Mini M2
-                print("🎵 Transcribing audio...")
+    # ── Phase 5: resumable chunked transcription ───────────────────────
+
+    def _transcribe_with_resume(self, video_filepath: str,
+                                workdir: Path | None, resume: bool) -> str:
+        """Transcribe audio in chunks.  Writes transcript.partial.json after
+        each chunk so a killed process can resume from the last checkpoint."""
+        import whisper
+        import torch
+        import numpy as np
+
+        model_name = os.getenv("WHISPER_MODEL", "base")
+        requested = os.getenv("WHISPER_DEVICE", "cpu").lower()
+        if requested == "auto":
+            if torch.backends.mps.is_available():
+                device = "mps"
+            elif torch.cuda.is_available():
+                device = "cuda"
+            else:
+                device = "cpu"
+        else:
+            device = requested
+
+        partial_path = (workdir / 'transcript.partial.json') if workdir else None
+        transcript_path = (workdir / 'transcript.json') if workdir else None
+
+        # If a complete transcript already exists, skip entirely
+        if transcript_path and transcript_path.exists():
+            print("⏭️  transcript.json already exists — skipping transcription", flush=True)
+            data = json.loads(transcript_path.read_text())
+            srt_path = self._segments_to_srt(data['segments'], video_filepath)
+            return srt_path
+
+        # Load prior partial if resuming
+        prior_segments = []
+        start_seconds = 0.0
+        if resume and partial_path and partial_path.exists():
+            try:
+                data = json.loads(partial_path.read_text())
+                prior_segments = data.get('segments', [])
+                if prior_segments:
+                    start_seconds = prior_segments[-1]['end']
+                    print(f"🔄 Resuming from {start_seconds:.1f}s ({len(prior_segments)} prior segments)", flush=True)
+            except Exception as e:
+                print(f"⚠️  Could not read partial transcript: {e}", flush=True)
+                prior_segments = []
+                start_seconds = 0.0
+
+        print(f"🎤 Generating subtitles using Whisper {model_name} on {device}...", flush=True)
+        print(f"📥 Loading Whisper {model_name} model...", flush=True)
+        model = whisper.load_model(model_name, device=device)
+        print(f"✅ Whisper {model_name} model loaded on {device}", flush=True)
+
+        # Load audio once (16kHz mono — whisper standard)
+        print("🎵 Loading audio...", flush=True)
+        audio = whisper.load_audio(video_filepath)
+        total_seconds = len(audio) / 16000.0
+        print(f"   Audio length: {total_seconds:.1f}s", flush=True)
+
+        _write_progress(workdir, 'transcribe', {
+            'segments_done': len(prior_segments),
+            'audio_seconds_done': start_seconds,
+            'audio_seconds_total': total_seconds,
+        })
+
+        # Already fully transcribed in prior partial?
+        if start_seconds >= total_seconds - 1.0:
+            print("✅ Transcription already complete from prior run", flush=True)
+        else:
+            # Chunked transcription loop
+            chunk_size = TRANSCRIBE_CHUNK_SECONDS
+            current_pos = start_seconds
+            all_segments = list(prior_segments)
+            t0 = time.time()
+
+            while current_pos < total_seconds:
+                chunk_end = min(current_pos + chunk_size, total_seconds)
+                start_sample = int(current_pos * 16000)
+                end_sample = int(chunk_end * 16000)
+                chunk_audio = audio[start_sample:end_sample]
+
+                # Provide context from prior text to maintain coherence
+                initial_prompt = "This is a lecture or educational video with clear speech."
+                if all_segments:
+                    recent_text = ' '.join(s['text'] for s in all_segments[-5:])
+                    initial_prompt = recent_text[-200:] if len(recent_text) > 200 else recent_text
+
+                print(f"🎵 Transcribing chunk {current_pos:.0f}s-{chunk_end:.0f}s / {total_seconds:.0f}s ...", flush=True)
+
                 result = model.transcribe(
-                    video_filepath,
+                    chunk_audio,
                     language="en",
                     task="transcribe",
                     temperature=0.0,
@@ -99,9 +205,9 @@ class CommandLineArgRunner:
                     patience=2.0,
                     length_penalty=1.0,
                     suppress_tokens=[-1],
-                    initial_prompt="This is a lecture or educational video with clear speech.",
+                    initial_prompt=initial_prompt,
                     condition_on_previous_text=True,
-                    word_timestamps=False,  # Disabled to avoid MPS float64 issues
+                    word_timestamps=False,
                     prepend_punctuations="\"'([{-",
                     append_punctuations="\"'.,!?:)]}",
                     compression_ratio_threshold=2.4,
@@ -110,36 +216,71 @@ class CommandLineArgRunner:
                     fp16=False,
                     verbose=False
                 )
-                print("✅ Transcription completed")
-                
-                # Save to SRT file
-                srt_path = video_filepath.rsplit(".", 1)[0] + ".srt"
-                with open(srt_path, "w", encoding='utf-8') as f:
-                    for i, segment in enumerate(result["segments"]):
-                        start_time = segment["start"]
-                        end_time = segment["end"]
-                        text = segment["text"].strip()
-                        
-                        # Format time for SRT
-                        def format_time(seconds):
-                            h = int(seconds // 3600)
-                            m = int((seconds % 3600) // 60)
-                            s = int(seconds % 60)
-                            ms = int((seconds - int(seconds)) * 1000)
-                            return f"{h:02}:{m:02}:{s:02},{ms:03}"
-                        
-                        f.write(f"{i+1}\n{format_time(start_time)} --> {format_time(end_time)}\n{text}\n\n")
-                
-                print(f"✅ Transcription saved to: {srt_path}")
-                subtitle_parser = SubtitleSRTParser(srt_path)
-            elif subtitle_filepath.endswith(".srt"):
-                subtitle_parser = SubtitleSRTParser(subtitle_filepath)
-            else:
-                subtitle_parser = SubtitleWebVTTParser(subtitle_filepath)
 
-            self.__generate_pdf_with_subtitles__(
-                video_segment_finder, video_filepath, subtitle_parser, output_filepath
-            )
+                # Adjust timestamps to absolute position
+                for seg in result.get('segments', []):
+                    all_segments.append({
+                        'start': seg['start'] + current_pos,
+                        'end': seg['end'] + current_pos,
+                        'text': seg['text'].strip(),
+                    })
+
+                current_pos = chunk_end
+
+                # Checkpoint: write partial atomically
+                if partial_path:
+                    _atomic_json_write(partial_path, {
+                        'segments': all_segments,
+                        'model': model_name,
+                        'device': device,
+                        'language': 'en',
+                    })
+
+                elapsed = time.time() - t0
+                _write_progress(workdir, 'transcribe', {
+                    'segments_done': len(all_segments),
+                    'audio_seconds_done': current_pos,
+                    'audio_seconds_total': total_seconds,
+                    'elapsed_seconds': int(elapsed),
+                })
+
+                print(f"   ✅ Chunk done: {len(result.get('segments', []))} segments, "
+                      f"total {len(all_segments)} segments so far", flush=True)
+
+            prior_segments = all_segments
+
+        print(f"✅ Transcription completed: {len(prior_segments)} segments", flush=True)
+
+        # Write final transcript
+        if transcript_path:
+            _atomic_json_write(transcript_path, {
+                'segments': prior_segments,
+                'model': model_name,
+                'device': device,
+                'language': 'en',
+            })
+
+        srt_path = self._segments_to_srt(prior_segments, video_filepath)
+        return srt_path
+
+    @staticmethod
+    def _segments_to_srt(segments: list, video_filepath: str) -> str:
+        """Convert segment list to an SRT file on disk."""
+        srt_path = video_filepath.rsplit(".", 1)[0] + ".srt"
+
+        def _fmt(seconds):
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = int(seconds % 60)
+            ms = int((seconds - int(seconds)) * 1000)
+            return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+        with open(srt_path, "w", encoding='utf-8') as f:
+            for i, seg in enumerate(segments):
+                f.write(f"{i+1}\n{_fmt(seg['start'])} --> {_fmt(seg['end'])}\n{seg['text']}\n\n")
+
+        print(f"✅ SRT saved: {srt_path} ({len(segments)} segments)", flush=True)
+        return srt_path
 
     def __generate_pdf_with_subtitles__(
         self, video_segment_finder, video_filepath, subtitle_parser, output_filepath

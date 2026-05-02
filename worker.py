@@ -786,10 +786,23 @@ class EnhancedWorker:
         try:
             print(f"🎬 Starting PDF generation. Subprocess log: {log_path}", flush=True)
             process_start = time.time()
-            process = subprocess.Popen([
+
+            # Phase 5: pass --workdir and --resume so transcription can
+            # checkpoint to transcript.partial.json and resume after a kill.
+            cmd_args = [
                 sys.executable, "-u", "-m", "src.main",
-                str(video_path), "-o", str(pdf_path)
-            ], stdout=log_fh, stderr=subprocess.STDOUT, cwd=Path(__file__).parent)
+                str(video_path), "-o", str(pdf_path),
+            ]
+            # Infer workdir from the pdf_path's parent (it lives in the persistent workdir)
+            task_workdir = pdf_path.parent if self.use_persistent_workdir else None
+            if task_workdir and task_workdir.exists():
+                cmd_args.extend(["--workdir", str(task_workdir), "--resume"])
+
+            process = subprocess.Popen(
+                cmd_args,
+                stdout=log_fh, stderr=subprocess.STDOUT,
+                cwd=Path(__file__).parent,
+            )
 
             # Register so the outer task_timeout / crash handler can
             # terminate this process if the inner thread is stuck.
