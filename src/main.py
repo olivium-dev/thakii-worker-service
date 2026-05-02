@@ -174,10 +174,25 @@ class CommandLineArgRunner:
                 prior_segments = []
                 start_seconds = 0.0
 
-        print(f"🎤 Generating subtitles using Whisper {model_name} on {device}...", flush=True)
+        # fp16 is required for MPS/CUDA to actually use the GPU compute
+        # paths. On CPU we keep fp32 (fp16 on CPU is slower, not faster).
+        use_fp16 = device in ("mps", "cuda")
+
+        print(f"🎤 Generating subtitles using Whisper {model_name} on {device} (fp16={use_fp16})...", flush=True)
         print(f"📥 Loading Whisper {model_name} model...", flush=True)
         model = whisper.load_model(model_name, device=device)
         print(f"✅ Whisper {model_name} model loaded on {device}", flush=True)
+
+        if device == "mps":
+            try:
+                import torch
+                first_param = next(model.parameters())
+                actual_device = str(first_param.device)
+                print(f"🔍 Whisper model parameter device: {actual_device}", flush=True)
+                if "mps" not in actual_device.lower():
+                    print(f"⚠️  WARNING: requested mps but model is on {actual_device} — GPU acceleration NOT active", flush=True)
+            except Exception as e:
+                print(f"⚠️  Could not introspect model device: {e}", flush=True)
 
         # Load audio once (16kHz mono — whisper standard)
         print("🎵 Loading audio...", flush=True)
@@ -213,8 +228,10 @@ class CommandLineArgRunner:
                     recent_text = ' '.join(s['text'] for s in all_segments[-5:])
                     initial_prompt = recent_text[-200:] if len(recent_text) > 200 else recent_text
 
+                chunk_seconds = chunk_end - current_pos
                 print(f"🎵 Transcribing chunk {current_pos:.0f}s-{chunk_end:.0f}s / {total_seconds:.0f}s ...", flush=True)
 
+                chunk_t0 = time.time()
                 result = model.transcribe(
                     chunk_audio,
                     language="en",
@@ -233,9 +250,15 @@ class CommandLineArgRunner:
                     compression_ratio_threshold=2.4,
                     logprob_threshold=-1.0,
                     no_speech_threshold=0.6,
-                    fp16=False,
+                    fp16=use_fp16,
                     verbose=False
                 )
+                chunk_wall = time.time() - chunk_t0
+                rtf = chunk_wall / max(chunk_seconds, 1.0)
+                print(f"   ⏱  chunk wall={chunk_wall:.1f}s  audio={chunk_seconds:.0f}s  rtf={rtf:.2f}x", flush=True)
+                # Watchdog hint: if rtf > 2.0 on GPU, GPU is silently inactive.
+                if device != "cpu" and rtf > 2.0:
+                    print(f"   ⚠️  rtf={rtf:.2f}x on device={device} — GPU appears inactive; investigate", flush=True)
 
                 # Adjust timestamps to absolute position
                 for seg in result.get('segments', []):

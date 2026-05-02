@@ -267,6 +267,12 @@ jobs:
         # than CPU on M2. Fallback: change to "cpu" or remove if it
         # ever destabilises (worker logs the device on every pickup).
         WHISPER_DEVICE=mps
+        # Allow PyTorch ops not supported on MPS to fall back to CPU
+        # instead of erroring. Without this, Whisper silently fails over
+        # to CPU for the entire model.
+        PYTORCH_ENABLE_MPS_FALLBACK=1
+        # Phase 6: enable within-task parallelism (frames + transcribe)
+        WORKER_PARALLEL_STAGES=true
         WORKER_USE_PERSISTENT_WORKDIR=true
         WORKER_WORKDIR_BASE=/Users/fanusdigital/thakii-worker-service/workdir
         WORKDIR_RETENTION_HOURS=24
