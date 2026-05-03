@@ -1,0 +1,108 @@
+name: Quarantine /Users/fanusdigital/~ (manual)
+
+# One-shot: rename the suspect ~ directory to a quarantine name and verify
+# thakii worker stays healthy. NOT a delete -- the directory is just moved
+# so we can roll back instantly if anything breaks.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  quarantine:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Setup SSH via Cloudflare
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+
+    - name: Rename ~ -> _QUARANTINE_tilde_dir and verify thakii health
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2298 &
+        TUNNEL_PID=$!
+        sleep 15
+
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2298 fanusdigital@localhost <<'ENDSSH'
+        set +e
+        echo "==================== BEFORE ===================="
+        echo "--- df -h / ---"
+        df -h / | tail -2
+        echo "--- du of suspect dirs ---"
+        du -sh "/Users/fanusdigital/~" 2>/dev/null || echo "(~ literal not present)"
+        du -sh "/Users/fanusdigital/thakii-worker-service/workdir" 2>/dev/null
+        echo "--- thakii worker process(es) ---"
+        pgrep -fa worker.py || echo "(none running)"
+        echo "--- worker log tail ---"
+        tail -20 /Users/fanusdigital/thakii-worker-service/logs/worker.log 2>/dev/null || echo "(no worker.log)"
+        echo "--- worker api ---"
+        curl -sf -m 5 http://localhost:8080/health 2>&1 | head -5 || echo "(api unreachable)"
+        echo
+
+        echo "==================== ACTION ===================="
+        if [ -d "/Users/fanusdigital/~" ]; then
+          TS=$(date +%Y%m%d_%H%M%S)
+          TARGET="/Users/fanusdigital/_QUARANTINE_tilde_dir_${TS}"
+          echo "Renaming /Users/fanusdigital/~  ->  $TARGET"
+          mv "/Users/fanusdigital/~" "$TARGET"
+          MV_RC=$?
+          echo "mv exit code: $MV_RC"
+          if [ $MV_RC -ne 0 ]; then
+            echo "ERROR: rename failed — leaving directory in place"
+            exit 1
+          fi
+        else
+          echo "Nothing to do — /Users/fanusdigital/~ does not exist"
+        fi
+
+        echo
+        echo "==================== AFTER (immediate) ===================="
+        echo "--- df -h / ---"
+        df -h / | tail -2
+        echo "--- ls /Users/fanusdigital/_QUARANTINE_tilde_dir_* ---"
+        ls -lad /Users/fanusdigital/_QUARANTINE_tilde_dir_* 2>/dev/null || echo "(no quarantine dir)"
+        echo
+
+        echo "==================== HEALTH CHECK (45s wait) ===================="
+        sleep 45
+
+        echo "--- thakii worker process(es) ---"
+        pgrep -fa worker.py
+        WORKER_RUNNING=$?
+
+        echo "--- worker api /health ---"
+        API_OUT=$(curl -sf -m 5 http://localhost:8080/health 2>&1 | head -10)
+        API_RC=$?
+        echo "$API_OUT"
+
+        echo "--- worker log tail (last 30 lines) ---"
+        tail -30 /Users/fanusdigital/thakii-worker-service/logs/worker.log 2>/dev/null
+
+        echo "--- recent stderr (look for ENOSPC / FileNotFoundError / ImportError) ---"
+        tail -50 /Users/fanusdigital/thakii-worker-service/logs/worker_error.log 2>/dev/null | \
+          grep -E "(ENOSPC|FileNotFound|ImportError|Traceback|insufficient disk|tilde|fanusdigital/~)" | tail -10 || \
+          echo "(no relevant errors in last 50 lines)"
+
+        echo
+        echo "==================== VERDICT ===================="
+        if [ $WORKER_RUNNING -ne 0 ]; then
+          echo "WARN: no worker.py process running (worker may be between picks; retry health probe)"
+        else
+          echo "OK: worker.py process is running"
+        fi
+        if [ $API_RC -ne 0 ]; then
+          echo "WARN: worker API /health did not return 2xx (may be on a different port)"
+        else
+          echo "OK: worker API /health responded"
+        fi
+
+        echo
+        echo "ROLLBACK INSTRUCTIONS:"
+        echo "  ssh thakii-03 'mv /Users/fanusdigital/_QUARANTINE_tilde_dir_* /Users/fanusdigital/~'"
+        ENDSSH
+        STATUS=$?
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+        exit $STATUS
