@@ -1,0 +1,47 @@
+name: Probe disk and active workdir (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Setup SSH via Cloudflare
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+    - name: Probe
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2295 &
+        TUNNEL_PID=$!
+        sleep 15
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2295 fanusdigital@localhost <<'ENDSSH'
+        set +e
+        echo "=== df -h / ==="
+        df -h /
+        echo
+        echo "=== workdir contents ==="
+        WDBASE=/Users/fanusdigital/thakii-worker-service/workdir
+        ls -la "$WDBASE" 2>/dev/null
+        echo
+        echo "=== sizes inside any active workdirs ==="
+        find "$WDBASE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | while read D; do
+          echo "--- $D ---"
+          du -sh "$D"
+          ls -la "$D" | head -20
+          echo
+        done
+        echo "=== worker process(es) ==="
+        pgrep -fa worker.py
+        echo
+        echo "=== worker log (last 60 lines) ==="
+        tail -60 /Users/fanusdigital/thakii-worker-service/logs/worker.log 2>/dev/null
+        ENDSSH
+        STATUS=$?
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+        exit $STATUS
