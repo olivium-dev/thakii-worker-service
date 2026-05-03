@@ -1,0 +1,50 @@
+name: Probe worker health (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Setup SSH via Cloudflare
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+
+    - name: Probe
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2297 &
+        TUNNEL_PID=$!
+        sleep 15
+
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2297 fanusdigital@localhost <<'ENDSSH'
+        set +e
+        echo "==================== DISK ===================="
+        df -h /
+        echo
+        echo "==================== TOP-LEVEL UNDER /Users/fanusdigital ===================="
+        du -sh /Users/fanusdigital/* 2>/dev/null | sort -h | tail -15
+        echo
+        echo "==================== WORKER PROCESS ===================="
+        pgrep -fa worker.py
+        echo
+        echo "==================== WORKER LOG (last 40 lines) ===================="
+        tail -40 /Users/fanusdigital/thakii-worker-service/logs/worker.log 2>/dev/null
+        echo
+        echo "==================== WORKER ERROR LOG (last 80 lines, full) ===================="
+        tail -80 /Users/fanusdigital/thakii-worker-service/logs/worker_error.log 2>/dev/null
+        echo
+        echo "==================== ANY 'tilde' OR 'fanusdigital/~' MENTIONS ===================="
+        grep -E "(fanusdigital/~|tilde)" /Users/fanusdigital/thakii-worker-service/logs/*.log 2>/dev/null | tail -20 || echo "(none)"
+        echo
+        echo "==================== HEALTH ===================="
+        curl -sf -m 5 http://localhost:8080/health 2>&1 | head -10 || echo "(no /health on 8080)"
+        ENDSSH
+        STATUS=$?
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+        exit $STATUS
