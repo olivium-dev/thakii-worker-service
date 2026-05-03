@@ -1,0 +1,133 @@
+name: Cleanup disk on thakii-03 (manual)
+
+# One-shot cleanup that proceeds in three reversible-ish phases. After each
+# phase the workflow waits 30 seconds and verifies the worker process is
+# still alive and still polling the backend.
+#
+# Phase A: rm -rf /Users/fanusdigital/_QUARANTINE_tilde_dir_*  (~67 GB)
+# Phase B: rm -rf /Users/fanusdigital/thakii-worker-service-backup-*  (~1.4 GB)
+# Phase C: prune unlocked workdirs (~30+ GB) — worker.py keeps a lock.json
+#         in any in-flight workdir, so we just delete every workdir without
+#         a lock.json. The corresponding DB rows are in status='done' for
+#         all of them as of the last verification.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Setup SSH via Cloudflare
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+        sudo apt-get update && sudo apt-get install -y sshpass
+
+    - name: Cleanup
+      env:
+        THAKII_PASSWORD: ${{ secrets.THAKII_03_PASSWORD }}
+      run: |
+        cloudflared access ssh --hostname ssh-thakii-3.fanusdigital.site --url ssh://localhost:2296 &
+        TUNNEL_PID=$!
+        sleep 15
+
+        sshpass -p "$THAKII_PASSWORD" ssh -o StrictHostKeyChecking=no -p 2296 fanusdigital@localhost <<'ENDSSH'
+        set +e
+        WS=/Users/fanusdigital/thakii-worker-service
+        WDBASE="$WS/workdir"
+
+        snapshot() {
+          echo "  df:    $(df -h / | awk 'NR==2{print $4 " free"}')"
+          echo "  worker pids: $(pgrep -fa worker.py | tr '\n' ' ')"
+          echo "  last poll: $(grep 'API Response' "$WS/logs/worker.log" 2>/dev/null | tail -1)"
+        }
+
+        verify_alive() {
+          local label="$1"
+          local n=0
+          for i in 1 2 3; do
+            if pgrep -f worker.py >/dev/null; then n=$((n+1)); fi
+            sleep 10
+          done
+          if [ $n -ge 2 ]; then
+            echo "  OK: worker.py alive (saw it on $n / 3 probes during 30 s after $label)"
+            return 0
+          else
+            echo "  WARN: worker.py seen only $n / 3 times after $label — investigate"
+            return 1
+          fi
+        }
+
+        echo "==================== INITIAL ===================="
+        snapshot
+        echo "  /Users/fanusdigital/* > 100 MB:"
+        du -sh /Users/fanusdigital/* 2>/dev/null | awk '$1 ~ /[GM]/ && ($1+0 > 100 || $1 ~ /G/)' | sort -h
+        echo
+
+        echo "==================== PHASE A: quarantine ~ dir ===================="
+        for D in /Users/fanusdigital/_QUARANTINE_tilde_dir_*; do
+          if [ -d "$D" ]; then
+            SZ=$(du -sh "$D" 2>/dev/null | awk '{print $1}')
+            echo "  rm -rf $D  (was $SZ)"
+            rm -rf "$D"
+            echo "  rm exit: $?"
+          fi
+        done
+        snapshot
+        verify_alive "phase A" || exit 11
+        echo
+
+        echo "==================== PHASE B: old backup tarballs ===================="
+        for B in /Users/fanusdigital/thakii-worker-service-backup-*; do
+          if [ -e "$B" ]; then
+            SZ=$(du -sh "$B" 2>/dev/null | awk '{print $1}')
+            echo "  rm -rf $B  (was $SZ)"
+            rm -rf "$B"
+          fi
+        done
+        snapshot
+        verify_alive "phase B" || exit 12
+        echo
+
+        echo "==================== PHASE C: prune unlocked workdirs ===================="
+        if [ -d "$WDBASE" ]; then
+          BEFORE=$(du -sh "$WDBASE" 2>/dev/null | awk '{print $1}')
+          echo "  workdir size before: $BEFORE"
+          KEPT=0; PRUNED=0
+          find "$WDBASE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | while read D; do
+            if [ -f "${D}/lock.json" ]; then
+              echo "  SKIP locked: $D"
+              KEPT=$((KEPT+1))
+              continue
+            fi
+            SZ=$(du -sh "$D" 2>/dev/null | awk '{print $1}')
+            echo "  PRUNE ($SZ): $D"
+            rm -rf "$D"
+            PRUNED=$((PRUNED+1))
+          done
+          AFTER=$(du -sh "$WDBASE" 2>/dev/null | awk '{print $1}')
+          echo "  workdir size after:  $AFTER"
+        else
+          echo "  (no workdir dir present)"
+        fi
+        snapshot
+        verify_alive "phase C" || exit 13
+        echo
+
+        echo "==================== FINAL ===================="
+        df -h /
+        echo
+        echo "Top consumers under /Users/fanusdigital:"
+        du -sh /Users/fanusdigital/* 2>/dev/null | sort -h | tail -10
+        echo
+        echo "Worker log tail (last 15 lines):"
+        tail -15 "$WS/logs/worker.log" 2>/dev/null
+        echo
+        echo "Worker error log tail (last 10 lines):"
+        tail -10 "$WS/logs/worker_error.log" 2>/dev/null
+        ENDSSH
+        STATUS=$?
+        kill $TUNNEL_PID 2>/dev/null || true
+        wait $TUNNEL_PID 2>/dev/null || true
+        exit $STATUS
