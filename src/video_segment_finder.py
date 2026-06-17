@@ -61,6 +61,7 @@ class VideoSegmentFinder:
         self.min_segment_duration = min_segment_duration or int(os.getenv('MIN_SEGMENT_DURATION', 2000))
         
         print(f"🎛️ Video Analysis Config: threshold={self.threshold}, min_change={self.min_change}, min_segment_duration={self.min_segment_duration}ms")
+        print(f"🎯 Enhanced Slide Detection: Center-focused analysis enabled (ignoring speaker corners)")
 
     def get_best_segment_frames(self, video_file):
         ''' Finds a list of best possible video segments 
@@ -226,19 +227,30 @@ class VideoSegmentFinder:
                 break
 
             results = self.__compare_frames__(prev_frame, cur_frame)
+            results_center = self.__compare_frames_center_focus__(prev_frame, cur_frame)
 
             # Store the results
             if save_stats_for_all_frames:
                 frame_num_to_stats[frame_num] = {
                     "timestamp": timestamp,
                     "num_pixels_changed": results["num_pixels_changed"],
+                    "center_pixels_changed": results_center["num_pixels_changed"],
                 }
 
-            has_changed = results["num_pixels_changed"] > self.min_change
+            # Enhanced detection: use both full-frame and center-focused analysis
+            # Center threshold is scaled down since we're analyzing a smaller area
+            center_threshold = int(self.min_change * 0.4)  # 40% of full threshold for center
+            has_changed_full = results["num_pixels_changed"] > self.min_change
+            has_changed_center = results_center["num_pixels_changed"] > center_threshold
+            
+            # Consider it changed if either method detects change
+            has_changed = has_changed_full or has_changed_center
             save_frame = False
 
             if prev_video_changes.are_previous_frames_stable() and has_changed:
-                save_frame = True
+                # Additional filter: skip white/blank frames
+                if not self.__is_white_or_blank_frame__(prev_frame):
+                    save_frame = True
 
             if save_frame:
                 selected_frames[frame_num] = {
@@ -349,6 +361,58 @@ class VideoSegmentFinder:
         num_pixels_changed = np.sum(mask > self.threshold)
 
         return {"num_pixels_changed": num_pixels_changed, "mask": mask, "diff": diff}
+
+    def __compare_frames_center_focus__(self, prev_frame, cur_frame):
+        """
+        Compare frames focusing on center area (slide content) while ignoring corners (speaker areas).
+        
+        Cropping strategy:
+        - Ignore left 20% and right 20% (speaker corners)
+        - Ignore top 15% and bottom 15% (headers/footers)
+        - Focus on center 60% width x 70% height (main slide content)
+        """
+        height, width = prev_frame.shape[:2]
+        
+        # Calculate crop boundaries (focus on center slide area)
+        left_crop = int(width * 0.20)
+        right_crop = int(width * 0.80)
+        top_crop = int(height * 0.15)
+        bottom_crop = int(height * 0.85)
+        
+        # Crop both frames to focus on slide content area
+        prev_cropped = prev_frame[top_crop:bottom_crop, left_crop:right_crop]
+        cur_cropped = cur_frame[top_crop:bottom_crop, left_crop:right_crop]
+        
+        # Compare the cropped regions
+        diff = cv2.absdiff(prev_cropped, cur_cropped)
+        mask = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+        num_pixels_changed = np.sum(mask > self.threshold)
+        
+        return {"num_pixels_changed": num_pixels_changed, "mask": mask, "diff": diff}
+
+    def __is_white_or_blank_frame__(self, frame):
+        """Detect white or blank frames that should be filtered out."""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        mean_brightness = np.mean(gray)
+        std_brightness = np.std(gray)
+        
+        # Frame is blank if mostly white with little variation
+        is_white = mean_brightness > 240 and std_brightness < 20
+        is_low_content = std_brightness < 10
+        
+        return is_white or is_low_content
+
+    def __is_duplicate_frame__(self, frame1, frame2, threshold=5):
+        """Check if two frames are duplicates/very similar."""
+        gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+        
+        diff = cv2.absdiff(gray1, gray2)
+        mean_diff = np.mean(diff)
+        pixels_changed = np.sum(diff > 10)
+        
+        similarity_score = mean_diff + (pixels_changed / diff.size) * 100
+        return similarity_score < threshold
 
 
 if __name__ == "__main__":
